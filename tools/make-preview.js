@@ -1,5 +1,5 @@
 // Generates a browser-previewable copy of the renderer with a stubbed
-// window.murmur, so the UI can be inspected and screenshotted without
+// window.yapanese, so the UI can be inspected and screenshotted without
 // launching Electron. Not shipped.
 const fs = require('node:fs');
 const path = require('node:path');
@@ -21,7 +21,7 @@ const SAMPLE = [
 ];
 let S = { micDevice: 'Microphone (HyperX Cloud III)', combo: 'ctrl+win', speed: 'balanced',
           autoPaste: true, launchAtLogin: true, language: 'en', model: '', yapPath: '', ffmpegPath: '' };
-window.murmur = {
+window.yapanese = {
   getSettings: async () => S,
   setSettings: async (p) => (S = { ...S, ...p }),
   getHistory: async () => SAMPLE,
@@ -33,7 +33,7 @@ window.murmur = {
   diagnostics: async () => ({
     yap: 'C:\\\\Users\\\\User\\\\AppData\\\\Local\\\\yap\\\\bin\\\\yap.exe',
     ffmpeg: 'C:\\\\Users\\\\User\\\\AppData\\\\Local\\\\Microsoft\\\\WinGet\\\\Packages\\\\Gyan.FFmpeg\\\\bin\\\\ffmpeg.exe',
-    dataDir: 'C:\\\\Users\\\\User\\\\AppData\\\\Roaming\\\\murmur',
+    dataDir: 'C:\\\\Users\\\\User\\\\AppData\\\\Roaming\\\\yapanese',
     hotkeyRegistered: true, version: '0.1.0', electron: '33.2.0',
   }),
   openDataDir: () => {},

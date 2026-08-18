@@ -1,6 +1,6 @@
 // Full end-to-end check: focus Notepad, hold the dictation combo, play speech
 // through the speakers so the microphone hears it, release, and read back what
-// Murmur pasted into Notepad.
+// Yapanese pasted into Notepad.
 //
 // Usage: node tools/test-e2e.js <wav>
 const { execFileSync, spawn } = require('node:child_process');
@@ -84,6 +84,6 @@ if ([FE]::GetForegroundWindow() -eq $np.MainWindowHandle) { "FOCUSED" } else { "
 
   console.log(`\nNOTEPAD CONTAINS: ${JSON.stringify(landed.slice(0, 160))}`);
   const ok = landed.length > 0 && landed !== '__cleared__';
-  console.log(ok ? 'PASS — Murmur pasted into the focused app' : 'FAIL — nothing was pasted');
+  console.log(ok ? 'PASS — Yapanese pasted into the focused app' : 'FAIL — nothing was pasted');
   process.exit(ok ? 0 : 1);
 })();

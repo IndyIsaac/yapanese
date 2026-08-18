@@ -1,6 +1,6 @@
 'use strict';
 
-const api = window.murmur;
+const api = window.yapanese;
 
 const el = (id) => document.getElementById(id);
 const entriesEl = el('entries');

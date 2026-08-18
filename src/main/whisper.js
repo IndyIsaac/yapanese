@@ -130,7 +130,7 @@ function resolveModel(settings) {
 /**
  * Transcribe PCM samples by invoking whisper-cli directly.
  *
- * Murmur already produces 16 kHz mono audio, which is exactly what whisper
+ * Yapanese already produces 16 kHz mono audio, which is exactly what whisper
  * wants, so there is no decode step and nothing for ffmpeg to do.
  */
 async function transcribe({ samples, sampleRate, settings, onProgress }) {
@@ -143,7 +143,7 @@ async function transcribe({ samples, sampleRate, settings, onProgress }) {
   }
 
   const preset = PRESETS[settings.speed] || PRESETS.balanced;
-  const base = path.join(os.tmpdir(), `murmur-${crypto.randomUUID()}`);
+  const base = path.join(os.tmpdir(), `yapanese-${crypto.randomUUID()}`);
   const wav = `${base}.wav`;
   fs.writeFileSync(wav, encodeWav(samples, sampleRate));
 

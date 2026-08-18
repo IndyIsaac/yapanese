@@ -14,3 +14,6 @@ src/renderer/preview.html
 # Internal product notes: describes the author's machine and habits,
 # not something a public clone needs.
 PRODUCT.md
+
+# electron-builder output
+dist/

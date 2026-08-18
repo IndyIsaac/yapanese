@@ -1,5 +1,5 @@
 // Verifies the capture -> delivery path lands text in the focused app.
-// Run Murmur with MURMUR_FAKE_TRANSCRIPT set, then run this.
+// Run Yapanese with YAPANESE_FAKE_TRANSCRIPT set, then run this.
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');

@@ -32,7 +32,7 @@ async function findYap(override) {
  *
  * Slower than calling whisper directly — yap re-encodes through ffmpeg and
  * uses whisper's default beam search over the full 30-second context — but it
- * keeps Murmur working on a machine that has yap but not whisper-cli.
+ * keeps Yapanese working on a machine that has yap but not whisper-cli.
  */
 async function viaYap({ samples, sampleRate, settings }) {
   const yap = await findYap(settings.yapPath);
@@ -44,7 +44,7 @@ async function viaYap({ samples, sampleRate, settings }) {
     };
   }
 
-  const file = path.join(os.tmpdir(), `murmur-${crypto.randomUUID()}.wav`);
+  const file = path.join(os.tmpdir(), `yapanese-${crypto.randomUUID()}.wav`);
   fs.writeFileSync(file, encodeWav(samples, sampleRate));
 
   try {
@@ -72,15 +72,15 @@ async function viaYap({ samples, sampleRate, settings }) {
 /**
  * Transcribe captured audio.
  *
- * whisper-cli is called directly when available: Murmur already produces the
+ * whisper-cli is called directly when available: Yapanese already produces the
  * 16 kHz mono audio whisper wants, so going through yap would add two process
  * spawns and a redundant ffmpeg conversion for no benefit.
  */
 async function transcribe({ samples, sampleRate, settings }) {
   // Test affordance: lets the capture -> delivery path be exercised without
   // needing real speech into the microphone.
-  if (process.env.MURMUR_FAKE_TRANSCRIPT) {
-    return { ok: true, text: process.env.MURMUR_FAKE_TRANSCRIPT, elapsedMs: 0 };
+  if (process.env.YAPANESE_FAKE_TRANSCRIPT) {
+    return { ok: true, text: process.env.YAPANESE_FAKE_TRANSCRIPT, elapsedMs: 0 };
   }
 
   let result = await whisper.transcribe({ samples, sampleRate, settings });

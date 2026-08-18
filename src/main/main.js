@@ -32,7 +32,7 @@ function createMainWindow() {
     minHeight: 480,
     show: false,
     backgroundColor: '#0f0f13',
-    title: 'Murmur',
+    title: 'Yapanese',
     icon: path.join(__dirname, '..', '..', 'assets', 'icon.ico'),
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
@@ -140,7 +140,7 @@ async function startRecording() {
   setState('recording');
   hud?.webContents.send('capture:start', {
     deviceLabel: settings.micDevice,
-    skipSilence: !!process.env.MURMUR_FAKE_TRANSCRIPT,
+    skipSilence: !!process.env.YAPANESE_FAKE_TRANSCRIPT,
   });
   log('startRecording: sent capture:start, device =', settings.micDevice || '(default)');
 }
@@ -186,9 +186,9 @@ function updateTray() {
   if (!tray) return;
   tray.setImage(makeTrayIcon(state));
   tray.setToolTip(
-    state === 'recording' ? 'Murmur — recording'
-      : state === 'transcribing' ? 'Murmur — transcribing'
-      : 'Murmur'
+    state === 'recording' ? 'Yapanese — recording'
+      : state === 'transcribing' ? 'Yapanese — transcribing'
+      : 'Yapanese'
   );
 }
 
@@ -200,7 +200,7 @@ function buildTray() {
     { label: 'History', click: () => showMainWindow('history') },
     { label: 'Settings', click: () => showMainWindow('settings') },
     { type: 'separator' },
-    { label: 'Quit Murmur', click: () => { app.isQuitting = true; app.quit(); } },
+    { label: 'Quit Yapanese', click: () => { app.isQuitting = true; app.quit(); } },
   ]);
   tray.setContextMenu(menu);
   tray.on('click', () => showMainWindow('history'));

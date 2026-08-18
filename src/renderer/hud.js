@@ -1,6 +1,6 @@
 'use strict';
 
-const api = window.murmur;
+const api = window.yapanese;
 
 const pill = document.getElementById('pill');
 const meter = document.getElementById('meter');
@@ -200,7 +200,7 @@ function stop() {
   if (rms < SILENCE_RMS_THRESHOLD && !skipSilenceGuard) {
     setState('error', 'No speech heard');
     api.sendError(
-      `That recording was too quiet to transcribe. Murmur is listening to "${currentDeviceLabel || 'the system default'}" — check the microphone in Settings if that is wrong.`
+      `That recording was too quiet to transcribe. Yapanese is listening to "${currentDeviceLabel || 'the system default'}" — check the microphone in Settings if that is wrong.`
     );
     setTimeout(hide, 3600);
     return;

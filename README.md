@@ -1,12 +1,16 @@
 <div align="center">
 
-<img src="assets/icon.png" width="96" alt="Murmur">
+<img src="assets/icon.png" width="96" alt="Yapanese">
 
-# Murmur
+# Yapanese
 
 **Local dictation for Windows. Hold a key, talk, and the text lands where your cursor is.**
 
 No account, no cloud, no per-minute billing. Nothing leaves your machine.
+
+<img src="assets/demo.gif" width="820" alt="Holding Ctrl+Win, speaking, and the text appearing in Notepad">
+
+<sub>Real capture — audio through the microphone, transcribed locally in under a second.</sub>
 
 </div>
 
@@ -19,7 +23,7 @@ voice to someone else's server. The models that make it work are open, run
 locally, and are fast enough on ordinary hardware — the missing piece is the
 thing that makes them feel invisible.
 
-Murmur is that piece: a tray app, a global hotkey, and your words in whatever
+Yapanese is that piece: a tray app, a global hotkey, and your words in whatever
 window you were already using.
 
 ## What it does
@@ -42,7 +46,7 @@ Measured on an Intel i7-14700F with an RTX 5050, using `large-v3-turbo-q5_0`:
 | 11 seconds | 2.6s | **0.9s** |
 
 Whisper's encoder always processes a fixed 30-second window, so a two-second clip
-costs the same as a thirty-second one unless you cap it. Murmur sizes that window
+costs the same as a thirty-second one unless you cap it. Yapanese sizes that window
 to the actual clip, which is most of the difference between "instant" and
 "why is this taking so long".
 
@@ -59,22 +63,24 @@ seems slow once and fast afterwards, that is why.
 
 ## Install
 
+Grab the installer from [Releases](../../releases), or build it yourself:
+
 ```powershell
-git clone https://github.com/<you>/murmur.git
-cd murmur
+git clone https://github.com/Vibeypirate/yapanese.git
+cd yapanese
 npm install
+npm run dist      # produces dist\Yapanese Setup <version>.exe
+```
+
+To run from source without packaging:
+
+```powershell
 npm start
 ```
 
 The speech model (`large-v3-turbo-q5_0`, 547MB) and the Silero VAD model (865KB)
 download automatically on first use into `%LOCALAPPDATA%\yap\models`. After that
 the app makes no network requests.
-
-To get a desktop shortcut:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File tools\make-icon.ps1
-```
 
 ## Usage
 
@@ -118,20 +124,22 @@ restored afterwards.
 | Paste automatically | on | Off copies to clipboard instead |
 | Start with Windows | off | Launches hidden in the tray |
 
-Transcripts are stored as plain JSON in `%APPDATA%\murmur`, readable and
+Transcripts are stored as plain JSON in `%APPDATA%\yapanese`, readable and
 deletable without this app being involved.
 
 ## Honest limitations
 
 - **Windows only.** The keyboard hook, the paste path and the tray behaviour are
   all platform-specific.
-- **Murmur sees every keystroke** while running, because a low-level keyboard
+- **Yapanese sees every keystroke** while running, because a low-level keyboard
   hook is the only way to detect hold and double-tap gestures. Non-shortcut keys
   are discarded immediately, nothing is logged or stored, and nothing is
   transmitted — but it is a real capability and you should know it is there.
-- **No installer yet.** It runs from a clone.
-- **Accuracy depends on your microphone.** A far-field webcam mic works, but a
-  close mic is better, as with any speech recognition.
+- **The installer is unsigned.** Windows SmartScreen will warn on first run
+  until the binary builds reputation. Code signing needs a certificate.
+- **Accuracy depends on your microphone.** A far-field webcam mic works — that
+  is what the demo above was recorded with — but a close mic is better, as with
+  any speech recognition.
 
 ## Credits
 

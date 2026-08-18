@@ -1,0 +1,61 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Catches syntax errors and bad requires in the main process without
+      # needing a display. The renderer is checked separately below.
+      - name: Check main process parses
+        run: |
+          Get-ChildItem -Recurse src -Filter *.js | ForEach-Object {
+            node --check $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "syntax error in $($_.FullName)" }
+          }
+        shell: pwsh
+
+      - name: Verify the app packages
+        run: npm run pack
+
+      - name: Upload unpacked build
+        uses: actions/upload-artifact@v4
+        with:
+          name: yapanese-win-unpacked
+          path: dist/win-unpacked
+          retention-days: 7
+
+  installer:
+    # Only build the full installer for tagged releases; the packaging check
+    # above is enough to catch breakage on ordinary pushes.
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe

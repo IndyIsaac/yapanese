@@ -3,7 +3,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 /** Explicit surface only — the renderer never sees ipcRenderer itself. */
-contextBridge.exposeInMainWorld('murmur', {
+contextBridge.exposeInMainWorld('yapanese', {
   // settings
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),

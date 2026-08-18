@@ -6,7 +6,7 @@ const os = require('node:os');
 
 // Deliberately not in userData: this must work even if app paths misbehave,
 // and it needs to be trivially findable while debugging.
-const FILE = path.join(os.tmpdir(), 'murmur-debug.log');
+const FILE = path.join(os.tmpdir(), 'yapanese-debug.log');
 
 function stamp() {
   return new Date().toISOString().slice(11, 23);
@@ -21,7 +21,7 @@ function log(...parts) {
 }
 
 function reset() {
-  try { fs.writeFileSync(FILE, `--- murmur session ${new Date().toISOString()} ---\n`); } catch {}
+  try { fs.writeFileSync(FILE, `--- yapanese session ${new Date().toISOString()} ---\n`); } catch {}
 }
 
 module.exports = { log, reset, FILE };

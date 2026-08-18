@@ -44,7 +44,7 @@ if ([FF]::GetForegroundWindow() -eq $np.MainWindowHandle) { "FOCUSED" } else { "
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
-  const SENTINEL = `MURMUR-PASTE-${Date.now()}`;
+  const SENTINEL = `YAPANESE-PASTE-${Date.now()}`;
 
   uIOhook.start();
   setClip(SENTINEL);

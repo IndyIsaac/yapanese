@@ -1,4 +1,4 @@
-# Draws the Murmur app icon and writes both PNG and ICO.
+# Draws the Yapanese app icon and writes both PNG and ICO.
 # Run: powershell -ExecutionPolicy Bypass -File tools\make-icon.ps1
 Add-Type -AssemblyName System.Drawing
 
