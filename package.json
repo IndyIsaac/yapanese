@@ -15,7 +15,7 @@
   },
   "devDependencies": {
     "electron": "^33.2.0",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^26.15.3"
   },
   "dependencies": {
     "@fontsource/inter": "^5.1.0",
@@ -24,7 +24,7 @@
   "build": {
     "appId": "dev.yapanese.app",
     "productName": "Yapanese",
-    "copyright": "Copyright © 2026 Indy",
+    "copyright": "Copyright (c) 2026 Indy",
     "directories": {
       "output": "dist",
       "buildResources": "assets"
@@ -43,7 +43,12 @@
     ],
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "assets/icon.ico"
     },
