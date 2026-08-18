@@ -1,155 +1,171 @@
 <div align="center">
 
-<img src="assets/icon.png" width="96" alt="Yapanese">
+<img src="assets/icon.png" width="88" alt="">
 
 # Yapanese
 
-**Local dictation for Windows. Hold a key, talk, and the text lands where your cursor is.**
+### Local dictation for Windows. Hold a key, talk, and the text lands where your cursor is.
 
-No account, no cloud, no per-minute billing. Nothing leaves your machine.
+No account. No cloud. No per-minute billing. Nothing leaves your machine.
+
+[![Build](https://github.com/Vibeypirate/yapanese/actions/workflows/build.yml/badge.svg)](https://github.com/Vibeypirate/yapanese/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/Vibeypirate/yapanese?color=7c6cf0&label=download)](https://github.com/Vibeypirate/yapanese/releases/latest)
+[![Licence](https://img.shields.io/badge/licence-MIT-7c6cf0)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-2a2a35)
+
+<br>
 
 <img src="assets/demo.gif" width="820" alt="Holding Ctrl+Win, speaking, and the text appearing in Notepad">
 
-<sub>Real capture — audio through the microphone, transcribed locally in under a second.</sub>
+<sub><b>Real capture.</b> Audio through a webcam microphone, transcribed locally in 866&nbsp;ms.</sub>
 
 </div>
 
----
+<br>
 
-## Why
+## Why this exists
 
-Good dictation on Windows generally means paying a subscription and sending your
-voice to someone else's server. The models that make it work are open, run
-locally, and are fast enough on ordinary hardware — the missing piece is the
-thing that makes them feel invisible.
+Dictation on Windows usually means a subscription and your voice on someone
+else's server. The models that make it work are open, run locally, and are fast
+enough on ordinary hardware. What's missing is the part that makes them
+disappear into your workflow.
 
-Yapanese is that piece: a tray app, a global hotkey, and your words in whatever
-window you were already using.
+That's this: a tray app, one global shortcut, and your words in whatever window
+you were already using.
 
 ## What it does
 
-- **Hold** your shortcut, talk, let go. The transcript pastes into the focused app.
-- **Double tap** to lock recording on for long-form thinking aloud; **tap once** to stop.
-- Every transcript is saved to a **searchable local history** before it is delivered
-  anywhere, so a failed paste is an inconvenience, never a lost thought.
-- **Voice activity detection** discards room noise, so a desk or webcam microphone
-  does not produce invented sentences.
-- Runs on the **GPU** when a CUDA build of whisper.cpp is present, otherwise CPU.
+| | |
+|---|---|
+| **Hold to dictate** | Hold the shortcut, talk, let go. The text pastes into the focused app. |
+| **Double tap to lock** | Locks recording on for long-form thinking aloud. Tap once to stop. |
+| **Searchable history** | Every transcript is saved locally *before* delivery, so a failed paste is an inconvenience, never a lost thought. |
+| **Ignores the room** | Voice activity detection discards background noise, so a desk or webcam mic doesn't produce invented sentences. |
+| **Uses your GPU** | Runs on CUDA when a compatible whisper.cpp build is present, otherwise CPU. |
+
+<br>
+
+<div align="center">
+<img src="assets/screenshot-history.png" width="49%" alt="History view with searchable transcripts">
+<img src="assets/screenshot-settings.png" width="49%" alt="Settings view">
+</div>
 
 ## Speed
 
-Measured on an Intel i7-14700F with an RTX 5050, using `large-v3-turbo-q5_0`:
+Measured on an Intel i7-14700F with an RTX 5050, model `large-v3-turbo-q5_0`:
 
 | audio length | CPU | GPU |
 |---|---|---|
-| 2 seconds | 2.0s | **0.8s** |
-| 11 seconds | 2.6s | **0.9s** |
+| 2 seconds | 2.0 s | **0.8 s** |
+| 11 seconds | 2.6 s | **0.9 s** |
 
-Whisper's encoder always processes a fixed 30-second window, so a two-second clip
-costs the same as a thirty-second one unless you cap it. Yapanese sizes that window
-to the actual clip, which is most of the difference between "instant" and
+Whisper's encoder always processes a fixed 30-second window, so a two-second
+clip costs the same as a thirty-second one unless you cap it. Yapanese sizes
+that window to the actual clip — most of the distance between "instant" and
 "why is this taking so long".
-
-## Requirements
-
-- Windows 10 or 11
-- [Node.js](https://nodejs.org/) 18+
-- [`whisper-cli`](https://github.com/ggml-org/whisper.cpp/releases) from whisper.cpp,
-  on your `PATH` or in `%LOCALAPPDATA%\yap\bin`
-
-For GPU acceleration, use one of whisper.cpp's `cublas` release builds instead of
-the plain one. The first run pays a one-time CUDA JIT compilation cost — if it
-seems slow once and fast afterwards, that is why.
 
 ## Install
 
-Grab the installer from [Releases](../../releases), or build it yourself:
+Download the installer from [**Releases**](https://github.com/Vibeypirate/yapanese/releases/latest), or build it:
 
 ```powershell
 git clone https://github.com/Vibeypirate/yapanese.git
 cd yapanese
 npm install
-npm run dist      # produces dist\Yapanese Setup <version>.exe
+npm run dist       # -> dist\Yapanese Setup <version>.exe
+npm start          # or just run it from source
 ```
 
-To run from source without packaging:
+### One prerequisite
 
-```powershell
-npm start
-```
+Yapanese needs [`whisper-cli`](https://github.com/ggml-org/whisper.cpp/releases)
+from whisper.cpp, on your `PATH` or in `%LOCALAPPDATA%\yap\bin`.
 
-The speech model (`large-v3-turbo-q5_0`, 547MB) and the Silero VAD model (865KB)
-download automatically on first use into `%LOCALAPPDATA%\yap\models`. After that
-the app makes no network requests.
+For GPU acceleration, take one of the `cublas` release builds instead of the
+plain one. The first run pays a one-time CUDA compilation cost — if it is slow
+once and fast forever after, that is why.
+
+Models download themselves on first use into `%LOCALAPPDATA%\yap\models`:
+`large-v3-turbo-q5_0` (547 MB) for speech and Silero (865 KB) for voice
+detection. After that, the app makes no network requests at all.
 
 ## Usage
 
 Default shortcut is **Ctrl + Win**, changeable in Settings.
 
-| gesture | what happens |
+| gesture | result |
 |---|---|
-| Hold | Records while held, transcribes on release |
-| Double tap | Locks recording on indefinitely |
-| Tap (while locked) | Stops and transcribes |
+| **Hold** | Records while held, transcribes on release |
+| **Double tap** | Locks recording on indefinitely |
+| **Tap** while locked | Stops and transcribes |
 
 ## How it works
 
 ```
-hotkey (low-level keyboard hook)
-   └─> capture     Web Audio, 16 kHz mono, in a hidden renderer
-        └─> WAV    written straight to a temp file — no conversion step
-             └─> whisper-cli --vad          speech detection, then transcription
-                  └─> history               written before delivery is attempted
-                       └─> clipboard + Ctrl+V into the focused window
+global keyboard hook
+  └─ capture ............ Web Audio, 16 kHz mono, hidden renderer
+      └─ WAV ............ written straight to temp — no conversion step
+          └─ whisper-cli --vad ...... speech detection, then transcription
+              └─ history ............ saved before delivery is attempted
+                  └─ clipboard + Ctrl+V into the focused window
 ```
 
-Two decisions worth explaining:
+Three decisions worth explaining:
 
-**The transcript is written to history before it is delivered.** Delivery can be
+**The transcript is saved before it is delivered.** Delivery is allowed to be
 best-effort because the record is already safe.
 
-**Text is pasted rather than typed.** Synthesising keystrokes mangles Unicode and
-anything the Windows key-event API treats as syntax. A clipboard paste moves the
-whole string verbatim in one keystroke, and the previous clipboard contents are
-restored afterwards.
+**Text is pasted, not typed.** Synthesised keystrokes mangle Unicode and
+anything the Windows key API treats as syntax. A clipboard paste moves the whole
+string verbatim in one keystroke; your previous clipboard is restored after.
+
+**A keyboard hook, not a registered shortcut.** Windows global shortcuts only
+report key-down and refuse modifier-only combinations, so neither hold nor
+double-tap is possible with them.
 
 ## Settings
 
-| Setting | Default | Notes |
+| Setting | Default | |
 |---|---|---|
-| Microphone | system default | Any input device Windows exposes |
+| Microphone | system default | Any input Windows exposes |
 | Shortcut | Ctrl + Win | Also Alt+Win, Ctrl+Shift, Win |
 | Ignore background noise | on | Voice activity detection |
-| Transcription quality | Balanced | Accurate / Balanced / Fast |
+| Transcription quality | Balanced | Accurate · Balanced · Fast |
 | Paste automatically | on | Off copies to clipboard instead |
 | Start with Windows | off | Launches hidden in the tray |
 
-Transcripts are stored as plain JSON in `%APPDATA%\yapanese`, readable and
+Transcripts live as plain JSON in `%APPDATA%\Yapanese` — readable, portable and
 deletable without this app being involved.
 
 ## Honest limitations
 
-- **Windows only.** The keyboard hook, the paste path and the tray behaviour are
-  all platform-specific.
-- **Yapanese sees every keystroke** while running, because a low-level keyboard
-  hook is the only way to detect hold and double-tap gestures. Non-shortcut keys
-  are discarded immediately, nothing is logged or stored, and nothing is
+- **Windows only.** The keyboard hook, paste path and tray behaviour are all
+  platform-specific.
+- **Yapanese sees every keystroke while running.** A low-level keyboard hook is
+  the only way to detect hold and double-tap gestures. Non-shortcut keys are
+  discarded immediately, nothing is logged or stored, and nothing is
   transmitted — but it is a real capability and you should know it is there.
-- **The installer is unsigned.** Windows SmartScreen will warn on first run
-  until the binary builds reputation. Code signing needs a certificate.
+- **The installer is unsigned.** SmartScreen will warn on first run until the
+  binary builds reputation. Signing needs a certificate.
 - **Accuracy depends on your microphone.** A far-field webcam mic works — that
-  is what the demo above was recorded with — but a close mic is better, as with
-  any speech recognition.
+  is what the demo was recorded with — but a close mic is better, as with any
+  speech recognition.
+
+## Contributing
+
+Issues and pull requests are welcome. `npm start` runs it from source;
+`tools/` holds the scripts used to test the capture, paste and gesture paths
+without needing a human to speak into the microphone.
 
 ## Credits
 
 Built on [whisper.cpp](https://github.com/ggml-org/whisper.cpp) by Georgi
 Gerganov and contributors, and OpenAI's [Whisper](https://github.com/openai/whisper)
 models. Started life while porting [finnvoor/yap](https://github.com/finnvoor/yap)
-to Windows.
+to Windows — hence the name.
 
 Full attribution in [THIRD-PARTY.md](THIRD-PARTY.md).
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE).
+[MIT](LICENSE).

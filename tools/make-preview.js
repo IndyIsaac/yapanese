@@ -1,6 +1,6 @@
 // Generates a browser-previewable copy of the renderer with a stubbed
-// window.yapanese, so the UI can be inspected and screenshotted without
-// launching Electron. Not shipped.
+// window.yapanese API and curated sample content, so the UI can be
+// screenshotted without exposing a real user's transcripts. Not shipped.
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -9,18 +9,22 @@ const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
 
 const STUB = `
 <script>
+const MIN = 60000, HR = 3600000;
 const SAMPLE = [
-  { id: 'a', startedAt: new Date(Date.now() - 4 * 60000).toISOString(), durationMs: 31000, delivered: 'pasted',
-    text: 'Refactor the transcription backend so the whisper subprocess call sits behind a protocol, then write tests for the JSON parsing before wiring anything else up.' },
-  { id: 'b', startedAt: new Date(Date.now() - 11 * 60000).toISOString(), durationMs: 7000, delivered: 'copied',
-    text: 'note to self, check whether uiohook actually reports key up reliably on Windows' },
-  { id: 'c', startedAt: new Date(Date.now() - 44 * 60000).toISOString(), durationMs: 72000, delivered: 'pasted',
-    text: 'Thinking out loud about the history model. If every recording writes to disk before it is delivered anywhere, then a failed paste is only an inconvenience rather than a lost transcript. That means delivery can be best effort and the log stays the source of truth.' },
-  { id: 'd', startedAt: new Date(Date.now() - 26 * 3600000).toISOString(), durationMs: 14000, delivered: 'pasted',
-    text: 'And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.' },
+  { id: 'a', startedAt: new Date(Date.now() - 3 * MIN).toISOString(), durationMs: 9000, delivered: 'pasted',
+    text: 'Refactor the transcription backend so the whisper call sits behind a protocol, then write tests for the JSON parsing before wiring anything else up.' },
+  { id: 'b', startedAt: new Date(Date.now() - 22 * MIN).toISOString(), durationMs: 74000, delivered: 'pasted',
+    text: 'Thinking out loud about the history model. If every recording is written to disk before it is delivered anywhere, then a failed paste is only an inconvenience rather than a lost thought. That means delivery can be best effort and the log stays the source of truth, which is a much easier thing to reason about.' },
+  { id: 'c', startedAt: new Date(Date.now() - 51 * MIN).toISOString(), durationMs: 6000, delivered: 'copied',
+    text: 'note to self — check whether the encoder window still scales correctly past thirty seconds' },
+  { id: 'd', startedAt: new Date(Date.now() - 2 * HR).toISOString(), durationMs: 18000, delivered: 'pasted',
+    text: 'Draft a reply saying the migration is on track, the staging environment is already cut over, and production follows on Thursday once the backfill finishes.' },
+  { id: 'e', startedAt: new Date(Date.now() - 26 * HR).toISOString(), durationMs: 11000, delivered: 'pasted',
+    text: 'Add a retry with exponential backoff around the upload step, but cap it at three attempts so a genuine outage fails fast instead of hanging.' },
 ];
 let S = { micDevice: 'Microphone (HyperX Cloud III)', combo: 'ctrl+win', speed: 'balanced',
-          autoPaste: true, launchAtLogin: true, language: 'en', model: '', yapPath: '', ffmpegPath: '' };
+          vad: true, autoPaste: true, launchAtLogin: true, language: 'en',
+          model: '', yapPath: '', ffmpegPath: '' };
 window.yapanese = {
   getSettings: async () => S,
   setSettings: async (p) => (S = { ...S, ...p }),
@@ -31,10 +35,10 @@ window.yapanese = {
   toggleRecording: async () => 'recording',
   getState: async () => 'idle',
   diagnostics: async () => ({
-    yap: 'C:\\\\Users\\\\User\\\\AppData\\\\Local\\\\yap\\\\bin\\\\yap.exe',
-    ffmpeg: 'C:\\\\Users\\\\User\\\\AppData\\\\Local\\\\Microsoft\\\\WinGet\\\\Packages\\\\Gyan.FFmpeg\\\\bin\\\\ffmpeg.exe',
-    dataDir: 'C:\\\\Users\\\\User\\\\AppData\\\\Roaming\\\\yapanese',
-    hotkeyRegistered: true, version: '0.1.0', electron: '33.2.0',
+    yap: 'C:\\\\Users\\\\you\\\\AppData\\\\Local\\\\yap\\\\bin\\\\yap.exe',
+    ffmpeg: 'C:\\\\Program Files\\\\ffmpeg\\\\bin\\\\ffmpeg.exe',
+    dataDir: 'C:\\\\Users\\\\you\\\\AppData\\\\Roaming\\\\Yapanese',
+    hotkeyRegistered: true, version: '0.1.0', electron: '33.4.11',
   }),
   openDataDir: () => {},
   on: () => () => {},
