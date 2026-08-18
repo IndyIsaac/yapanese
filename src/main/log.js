@@ -12,12 +12,17 @@ function stamp() {
   return new Date().toISOString().slice(11, 23);
 }
 
+// Opt-in only. A GUI app inherits whatever console launched it, and writing
+// there spams the user's terminal — which matters more than usual here,
+// because people dictate *into* terminals with this.
+const ECHO_TO_CONSOLE = process.env.YAPANESE_DEBUG === '1';
+
 function log(...parts) {
   const line = `${stamp()} ${parts
     .map((p) => (typeof p === 'string' ? p : JSON.stringify(p)))
     .join(' ')}\n`;
   try { fs.appendFileSync(FILE, line); } catch {}
-  process.stdout.write(line);
+  if (ECHO_TO_CONSOLE) process.stdout.write(line);
 }
 
 function reset() {
