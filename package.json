@@ -1,0 +1,18 @@
+{
+  "name": "murmur",
+  "version": "0.1.0",
+  "description": "Local, offline dictation for Windows. Hold a key, talk, and the text lands where your cursor is.",
+  "main": "src/main/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.1.0",
+    "uiohook-napi": "^1.5.5"
+  }
+}

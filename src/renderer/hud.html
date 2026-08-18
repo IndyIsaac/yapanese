@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; script-src 'self'">
+<title>Murmur</title>
+<link rel="stylesheet" href="./fonts.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: transparent; overflow: hidden; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    display: grid;
+    place-items: center;
+    -webkit-user-select: none;
+    cursor: default;
+  }
+
+  .pill {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 12px 18px;
+    border-radius: 999px;
+    /* The window has fixed bounds and clips anything wider, so the pill has
+       to stay inside them rather than growing with its content. */
+    max-width: calc(100vw - 24px);
+    box-sizing: border-box;
+    background: rgba(23, 23, 29, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    backdrop-filter: blur(18px) saturate(1.3);
+    box-shadow: 0 18px 44px -10px rgba(0, 0, 0, 0.8), 0 2px 8px rgba(0, 0, 0, 0.5);
+    color: #f2f2f5;
+    transform: translateY(10px) scale(0.97);
+    opacity: 0;
+    transition: transform 260ms cubic-bezier(.22,1,.36,1), opacity 200ms ease-out;
+  }
+  .pill.in { transform: none; opacity: 1; }
+
+  /* state lamp */
+  .lamp { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: #85859a; }
+  .pill[data-state='recording'] .lamp {
+    background: #f0616d;
+    box-shadow: 0 0 0 0 rgba(240, 97, 109, 0.55);
+    animation: ping 1.8s cubic-bezier(.22,1,.36,1) infinite;
+  }
+  @keyframes ping {
+    0%   { box-shadow: 0 0 0 0 rgba(240,97,109,.5); }
+    70%  { box-shadow: 0 0 0 8px rgba(240,97,109,0); }
+    100% { box-shadow: 0 0 0 0 rgba(240,97,109,0); }
+  }
+  .pill[data-state='done'] .lamp { background: #4ade80; }
+  .pill[data-state='error'] .lamp { background: #f0616d; }
+
+  /* Locked recording gets a steady ring instead of the pulse, so a glance
+     tells you whether it stops when you let go or keeps running. */
+  .pill[data-locked='true'] .lamp {
+    animation: none;
+    box-shadow: 0 0 0 3px rgba(240, 97, 109, 0.28);
+  }
+  .pill[data-locked='true'] { border-color: rgba(240, 97, 109, 0.4); }
+
+  /* the meter is the signature: real levels, not a decorative loop */
+  .meter { display: flex; align-items: center; gap: 2.5px; height: 22px; flex: 1; min-width: 0; }
+  .meter i {
+    display: block;
+    width: 2.5px;
+    min-height: 2.5px;
+    border-radius: 2px;
+    background: #7c6cf0;
+    transform-origin: center;
+    transition: height 70ms linear, opacity 200ms ease;
+  }
+  .pill[data-state='transcribing'] .meter i { background: #4a4a5c; }
+
+  .label { font-size: 12.5px; color: #b6b6c4; white-space: nowrap; }
+  .time {
+    font-size: 12.5px; color: #f2f2f5;
+    font-variant-numeric: tabular-nums;
+    min-width: 34px; text-align: right;
+    flex: 0 0 auto;
+  }
+
+  /* transcribing: bars settle and a sweep runs through them */
+  .sweep { position: relative; overflow: hidden; }
+  .pill[data-state='transcribing'] .sweep::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(124,108,240,.85), transparent);
+    animation: sweep 1.1s cubic-bezier(.4,0,.6,1) infinite;
+  }
+  @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+  .msg {
+    font-size: 12.5px;
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #b6b6c4;
+  }
+  .pill[data-state='error'] .msg { color: #f4919a; }
+  .pill[data-state='done'] .msg { color: #a7e8bd; }
+
+  /* Once recording stops there is no live signal to show, and leaving the
+     meter in place pushed the result message past the window edge. */
+  .pill[data-state='done'] .meter,
+  .pill[data-state='error'] .meter { display: none; }
+</style>
+</head>
+<body>
+  <div class="pill" id="pill" data-state="idle">
+    <span class="lamp"></span>
+    <span class="meter sweep" id="meter"></span>
+    <span class="msg" id="msg" hidden></span>
+    <span class="time" id="time">0:00</span>
+  </div>
+  <script src="./hud.js"></script>
+</body>
+</html>

@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; script-src 'self'">
+<title>Murmur</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+<nav class="rail">
+  <div class="brand">
+    <span class="mark">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v4"/>
+      </svg>
+    </span>
+    <h1>Murmur</h1>
+  </div>
+
+  <div class="nav">
+    <button data-view="history" aria-current="true">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 6h16M4 12h16M4 18h11"/>
+      </svg>
+      History
+    </button>
+    <button data-view="settings">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 7h9M17 7h3M4 17h3M11 17h9"/>
+        <circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/>
+      </svg>
+      Settings
+    </button>
+  </div>
+
+  <div class="rail-foot">
+    <div class="status" id="status" data-state="idle">
+      <span class="dot"></span>
+      <span id="status-text">Ready</span>
+    </div>
+    <div class="offline-badge">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3l7.5 3.2v5c0 4.5-3.1 8.3-7.5 9.6-4.4-1.3-7.5-5.1-7.5-9.6v-5z"/><path d="M9.2 12.1l2 2 3.6-3.9"/>
+      </svg>
+      Runs entirely on this machine
+    </div>
+  </div>
+</nav>
+
+<main class="main">
+  <div class="topbar"></div>
+
+  <!-- ------------------------------------------------------ history -->
+  <section class="view on" id="view-history">
+    <div class="view-head">
+      <h2>History</h2>
+      <span class="count" id="entry-count"></span>
+      <div class="search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+          <circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>
+        </svg>
+        <input id="search" type="search" placeholder="Search transcripts" autocomplete="off" spellcheck="false">
+      </div>
+      <button class="btn btn-primary" id="record-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v4"/>
+        </svg>
+        <span id="record-label">Record</span>
+      </button>
+    </div>
+    <div class="scroll" id="entries"></div>
+  </section>
+
+  <!-- ----------------------------------------------------- settings -->
+  <section class="view" id="view-settings">
+    <div class="view-head"><h2>Settings</h2></div>
+    <div class="scroll">
+      <div class="settings">
+
+        <div class="group">
+          <h3>Input</h3>
+          <div class="field">
+            <div class="label">
+              <b>Microphone</b>
+              <span>Which device Murmur records from.</span>
+            </div>
+            <div class="control">
+              <select id="mic"></select>
+            </div>
+          </div>
+          <div class="field">
+            <div class="label">
+              <b>Ignore background noise</b>
+              <span>Detects speech before transcribing, so room noise, typing and music never become invented text. Recommended, especially on a desk or webcam microphone.</span>
+            </div>
+            <div class="control"><input class="switch" type="checkbox" id="vad"></div>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3>Shortcut</h3>
+          <div class="field">
+            <div class="label">
+              <b>Dictation shortcut</b>
+              <span>Works anywhere in Windows, even when Murmur is not focused.</span>
+            </div>
+            <div class="control">
+              <select id="combo">
+                <option value="ctrl+win">Ctrl + Win</option>
+                <option value="alt+win">Alt + Win</option>
+                <option value="ctrl+shift">Ctrl + Shift</option>
+                <option value="win">Win</option>
+              </select>
+            </div>
+          </div>
+          <div class="gestures">
+            <div class="gesture">
+              <span class="g-key" id="g-hold">Hold</span>
+              <span class="g-desc">Records while you hold it. Let go and it transcribes.</span>
+            </div>
+            <div class="gesture">
+              <span class="g-key" id="g-double">Double tap</span>
+              <span class="g-desc">Locks recording on for as long as you like — for thinking aloud.</span>
+            </div>
+            <div class="gesture">
+              <span class="g-key" id="g-single">Tap</span>
+              <span class="g-desc">While locked, one tap stops and transcribes.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3>Speed</h3>
+          <div class="field">
+            <div class="label">
+              <b>Transcription quality</b>
+              <span id="speed-note">Whisper always encodes a 30-second window, so short clips cost the same as long ones. Trimming that window is what makes dictation feel instant.</span>
+            </div>
+            <div class="control">
+              <select id="speed">
+                <option value="accurate">Accurate — best results, slowest</option>
+                <option value="balanced">Balanced — recommended</option>
+                <option value="fast">Fast — small model, lower accuracy</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <div class="label">
+              <b>Last transcription</b>
+              <span id="last-timing">No recordings yet.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3>Output</h3>
+          <div class="field">
+            <div class="label">
+              <b>Paste automatically</b>
+              <span>Send the transcript straight into whatever app has focus. Turn this off to only copy it.</span>
+            </div>
+            <div class="control"><input class="switch" type="checkbox" id="autopaste"></div>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3>System</h3>
+          <div class="field">
+            <div class="label">
+              <b>Start with Windows</b>
+              <span>Launch hidden in the tray when you log in.</span>
+            </div>
+            <div class="control"><input class="switch" type="checkbox" id="autostart"></div>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3>Transcripts</h3>
+          <div class="field">
+            <div class="label">
+              <b>Stored on this machine</b>
+              <span id="datadir-path">Loading…</span>
+            </div>
+            <div class="control" style="display:flex;gap:6px">
+              <button class="btn" id="open-data">Open folder</button>
+              <button class="btn btn-danger" id="clear-history">Clear all</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3>Diagnostics</h3>
+          <div class="field" style="display:block">
+            <div class="diag" id="diag"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="./app.js"></script>
+</body>
+</html>
