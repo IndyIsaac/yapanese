@@ -11,7 +11,7 @@ const { transcribe } = require('./transcriber');
 const { pasteIntoFocusedApp, copyToClipboard } = require('./delivery');
 const { locate } = require('./tools');
 const { makeTrayIcon } = require('./icon');
-const { log, reset: resetLog, FILE: LOG_FILE } = require('./log');
+const { log, redact, reset: resetLog, FILE: LOG_FILE } = require('./log');
 const hotkeysModule = require('./hotkeys');
 
 let mainWindow = null;
@@ -54,8 +54,14 @@ function createMainWindow() {
     }
   });
 
+  // Only ever hand the OS a web URL. shell.openExternal will happily launch
+  // `file:` paths and registered Windows protocol handlers, so an unvalidated
+  // url here turns any injected link into command execution.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    let scheme = '';
+    try { scheme = new URL(url).protocol; } catch { scheme = ''; }
+    if (scheme === 'http:' || scheme === 'https:') shell.openExternal(url);
+    else log('blocked external open for scheme', JSON.stringify(scheme));
     return { action: 'deny' };
   });
 }
@@ -220,7 +226,7 @@ ipcMain.on('capture:result', async (_e, { samples, sampleRate, peak, rms }) => {
 
   const result = await transcribe({ samples: int16, sampleRate, settings });
   if (result.command) log('command:', result.command);
-  log('transcribe ->', result.ok ? `ok in ${result.elapsedMs}ms: ${JSON.stringify(result.text)}`
+  log('transcribe ->', result.ok ? `ok in ${result.elapsedMs}ms: ${redact(result.text)}`
                                  : `error: ${result.error}`);
 
   if (!result.ok) {
