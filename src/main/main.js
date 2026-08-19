@@ -327,6 +327,11 @@ ipcMain.handle('open:dataDir', () => shell.openPath(store.dataDir()));
 
 // ---------------------------------------------------------------- lifecycle
 
+// Windows identifies an app by this string rather than by its executable.
+// Without it the taskbar button and any notifications are attributed to
+// Electron's own identity instead of Yapanese. Must match build.appId.
+app.setAppUserModelId('dev.yapanese.app');
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
