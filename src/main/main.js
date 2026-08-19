@@ -493,10 +493,15 @@ ipcMain.handle('open:dataDir', () => shell.openPath(store.dataDir()));
 
 // ---------------------------------------------------------------- lifecycle
 
-// Windows identifies an app by this string rather than by its executable.
-// Without it the taskbar button and any notifications are attributed to
-// Electron's own identity instead of Yapanese. Must match build.appId.
-app.setAppUserModelId('dev.yapanese.app');
+// Windows identifies an app by this string rather than by its executable, and
+// it is what makes notifications and taskbar grouping say Yapanese.
+//
+// Only claimed when we are the installed app, though. Windows resolves the id
+// to a Start Menu shortcut and takes the taskbar icon from there; running from
+// source no such shortcut exists, so claiming it makes Windows fall back to
+// the executable's icon — Electron's own — instead of the window icon that
+// would otherwise be used. Must match build.appId.
+if (app.isPackaged) app.setAppUserModelId('dev.yapanese.app');
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
