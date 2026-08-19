@@ -9,9 +9,16 @@
 No account. No cloud. No per-minute billing. Nothing leaves your machine.
 
 [![Build](https://github.com/IndyIsaac/yapanese/actions/workflows/build.yml/badge.svg)](https://github.com/IndyIsaac/yapanese/actions/workflows/build.yml)
-[![Release](https://img.shields.io/github/v/release/IndyIsaac/yapanese?color=7c6cf0&label=download)](https://github.com/IndyIsaac/yapanese/releases/latest)
-[![Licence](https://img.shields.io/badge/licence-MIT-7c6cf0)](LICENSE)
-![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-2a2a35)
+[![Licence](https://img.shields.io/badge/licence-MIT-e8422f)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-2a2a30)
+
+<br>
+
+<a href="https://github.com/IndyIsaac/yapanese/releases/latest">
+  <img src="https://img.shields.io/badge/Download%20for%20Windows-e8422f?style=for-the-badge&logo=windows&logoColor=white&labelColor=1a1a1d" alt="Download for Windows" height="42">
+</a>
+
+<sub>Windows 10 or 11, 64-bit · no account, no sign-up · one prerequisite, see below</sub>
 
 <br>
 
@@ -66,7 +73,15 @@ that window to the actual clip — most of the distance between "instant" and
 
 ## Install
 
-Download the installer from [**Releases**](https://github.com/IndyIsaac/yapanese/releases/latest), or build it:
+**[Download the installer](https://github.com/IndyIsaac/yapanese/releases/latest)** and run it. No
+cloning, no toolchain, no build step — it installs to your user account, so it
+does not ask for administrator rights.
+
+Windows will warn you on first run because the installer is unsigned; see
+[Honest limitations](#honest-limitations).
+
+<details>
+<summary>Or build it from source</summary>
 
 ```powershell
 git clone https://github.com/IndyIsaac/yapanese.git
@@ -75,6 +90,12 @@ npm install
 npm run dist       # -> dist\Yapanese Setup <version>.exe
 npm start          # or just run it from source
 ```
+
+Running from source shows Electron's icon in the taskbar rather than
+Yapanese's, because the process really is `electron.exe`. The installed build
+does not have this problem.
+
+</details>
 
 ### One prerequisite
 
