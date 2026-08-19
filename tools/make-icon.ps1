@@ -53,25 +53,56 @@ $g.Dispose()
 $pngPath = Join-Path $out "icon.png"
 $bmp.Save($pngPath, [System.Drawing.Imaging.ImageFormat]::Png)
 
-# Wrap the PNG in an ICO container. Windows Vista and later read PNG-compressed
-# icon entries directly, so no BMP conversion is needed.
-$png = [System.IO.File]::ReadAllBytes($pngPath)
-$ms  = New-Object System.IO.MemoryStream
-$bw  = New-Object System.IO.BinaryWriter($ms)
-$bw.Write([UInt16]0)      # reserved
-$bw.Write([UInt16]1)      # type: icon
-$bw.Write([UInt16]1)      # image count
-$bw.Write([Byte]0)        # width  (0 = 256)
-$bw.Write([Byte]0)        # height (0 = 256)
-$bw.Write([Byte]0)        # palette
-$bw.Write([Byte]0)        # reserved
-$bw.Write([UInt16]1)      # colour planes
-$bw.Write([UInt16]32)     # bits per pixel
-$bw.Write([UInt32]$png.Length)
-$bw.Write([UInt32]22)     # offset to image data
-$bw.Write($png)
+# Windows picks the nearest entry out of the ICO and scales whatever it finds.
+# A single 256px entry therefore renders the taskbar, Alt-Tab, title bar and
+# Explorer icons from a 16x downscale, which is visibly soft. Ship the sizes
+# Windows actually asks for instead.
+#
+# Vista and later read PNG-compressed icon entries directly, so no BMP
+# conversion is needed for any of them.
+$sizes = @(256, 128, 64, 48, 32, 24, 16)
+$blobs = New-Object System.Collections.ArrayList
+
+foreach ($s in $sizes) {
+  $small = New-Object System.Drawing.Bitmap($s, $s)
+  $sg = [System.Drawing.Graphics]::FromImage($small)
+  $sg.InterpolationMode    = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+  $sg.PixelOffsetMode      = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+  $sg.SmoothingMode        = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+  $sg.CompositingQuality   = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+  $sg.DrawImage($bmp, (New-Object System.Drawing.Rectangle(0, 0, $s, $s)))
+  $sg.Dispose()
+
+  $msPng = New-Object System.IO.MemoryStream
+  $small.Save($msPng, [System.Drawing.Imaging.ImageFormat]::Png)
+  [void]$blobs.Add(@{ Size = $s; Data = $msPng.ToArray() })
+  $small.Dispose(); $msPng.Dispose()
+}
+
+$ms = New-Object System.IO.MemoryStream
+$bw = New-Object System.IO.BinaryWriter($ms)
+$bw.Write([UInt16]0)              # reserved
+$bw.Write([UInt16]1)              # type: icon
+$bw.Write([UInt16]$blobs.Count)   # image count
+
+$offset = 6 + (16 * $blobs.Count)
+foreach ($b in $blobs) {
+  # 0 means 256 in the directory entry, which is why 256 is written as 0.
+  $dim = if ($b.Size -ge 256) { 0 } else { $b.Size }
+  $bw.Write([Byte]$dim)           # width
+  $bw.Write([Byte]$dim)           # height
+  $bw.Write([Byte]0)              # palette
+  $bw.Write([Byte]0)              # reserved
+  $bw.Write([UInt16]1)            # colour planes
+  $bw.Write([UInt16]32)           # bits per pixel
+  $bw.Write([UInt32]$b.Data.Length)
+  $bw.Write([UInt32]$offset)
+  $offset += $b.Data.Length
+}
+foreach ($b in $blobs) { $bw.Write($b.Data) }
+
 $bw.Flush()
 [System.IO.File]::WriteAllBytes((Join-Path $out "icon.ico"), $ms.ToArray())
 $bw.Dispose(); $ms.Dispose(); $bmp.Dispose()
 
-Write-Output "wrote assets/icon.png and assets/icon.ico"
+Write-Output "wrote assets/icon.png and assets/icon.ico ($($blobs.Count) sizes)"
