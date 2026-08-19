@@ -170,7 +170,7 @@ function toggleRecording() {
 let hotkeys = null;
 let hookOk = false;
 
-function setupHotkeys() {
+async function setupHotkeys() {
   hotkeys = hotkeysModule.create({
     onStart: () => startRecording(),
     onFinish: () => stopRecording(),
@@ -181,7 +181,7 @@ function setupHotkeys() {
     log,
   });
 
-  const res = hotkeys.start(store.settings().combo);
+  const res = await hotkeys.start(store.settings().combo);
   hookOk = res.ok;
   return res;
 }
@@ -246,7 +246,7 @@ ipcMain.on('capture:result', async (_e, { samples, sampleRate, peak, rms }) => {
   });
 
   const delivery = settings.autoPaste
-    ? await pasteIntoFocusedApp(result.text)
+    ? await pasteIntoFocusedApp(result.text, () => hotkeys.paste())
     : copyToClipboard(result.text);
 
   store.updateEntry(entry.id, { delivered: delivery.mode });
@@ -317,7 +317,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => showMainWindow());
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     resetLog();
     log('app ready — log at', LOG_FILE);
 
@@ -340,18 +340,22 @@ if (!app.requestSingleInstanceLock()) {
       log('vad model:', r.ok ? (r.cached ? 'cached' : 'downloaded') : `unavailable (${r.error})`);
     });
 
-    const res = setupHotkeys();
-    if (!res.ok) {
-      mainWindow?.webContents.once('did-finish-load', () => {
-        mainWindow.webContents.send('toast', {
-          kind: 'error',
-          message: `The keyboard hook could not start (${res.error}). Hotkeys are unavailable — use the Record button.`,
-        });
-      });
-    }
-
     // Launched by Windows at login, or by the user from the Start menu.
+    // Shown before the hook is awaited: starting the hook process is quick,
+    // but the window must not be held hostage to it if it ever is not.
     if (!process.argv.includes('--hidden')) showMainWindow('history');
+
+    const res = await setupHotkeys();
+    if (!res.ok) {
+      // The window may already have finished loading by now, in which case
+      // waiting for did-finish-load would swallow the warning entirely.
+      const warn = () => mainWindow?.webContents.send('toast', {
+        kind: 'error',
+        message: `The keyboard hook could not start (${res.error}). Hotkeys are unavailable — use the Record button.`,
+      });
+      if (mainWindow && !mainWindow.webContents.isLoading()) warn();
+      else mainWindow?.webContents.once('did-finish-load', warn);
+    }
   });
 
   app.on('will-quit', () => {
