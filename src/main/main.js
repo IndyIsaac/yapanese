@@ -259,7 +259,15 @@ ipcMain.on('capture:result', async (_e, { samples, sampleRate, peak, rms }) => {
   store.updateEntry(entry.id, { delivered: delivery.mode });
 
   hotkeys?.reset();
-  setState('idle', { text: result.text, delivered: delivery.mode, elapsedMs: result.elapsedMs });
+  // Outlasts the HUD's own 1800ms dismissal so the "Pasted · N words"
+  // confirmation is readable and gets to fade out rather than being cut off
+  // when the window is hidden underneath it.
+  setState('idle', {
+    text: result.text,
+    delivered: delivery.mode,
+    elapsedMs: result.elapsedMs,
+    linger: 2100,
+  });
   mainWindow?.webContents.send('history:changed');
   if (!delivery.ok && delivery.error) {
     mainWindow?.webContents.send('toast', { kind: 'warn', message: delivery.error });

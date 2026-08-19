@@ -10,9 +10,12 @@ const msgEl = document.getElementById('msg');
 const BAR_COUNT = 22;
 const SAMPLE_RATE = 16000;
 
-const bars = Array.from({ length: BAR_COUNT }, () => {
+const bars = Array.from({ length: BAR_COUNT }, (_, i) => {
   const b = document.createElement('i');
   b.style.height = '3px';
+  // Position along the meter, so the transcribing animation can stagger
+  // across the bars from CSS rather than being driven from here.
+  b.style.setProperty('--i', String(i));
   meter.appendChild(b);
   return b;
 });
@@ -174,7 +177,11 @@ function stop() {
   const count = totalSamples;
 
   teardown();
-  setState('transcribing');
+  // Drop the locked styling before the transcribing look goes on, otherwise
+  // the red "still recording" ring sits on top of it and nothing appears to
+  // have changed when the user taps to stop.
+  pill.dataset.locked = 'false';
+  setState('transcribing', 'Transcribing…');
   resetMeter();
 
   if (count === 0) {
@@ -222,7 +229,9 @@ api.on('capture:stop', stop);
 api.on('lock', (locked) => {
   pill.dataset.locked = String(locked);
   msgEl.hidden = !locked;
-  if (locked) msgEl.textContent = 'Locked — tap to stop';
+  // Says "recording" rather than "locked": the thing the user needs
+  // confirming is that it is still listening, not what mode it is in.
+  if (locked) msgEl.textContent = 'Recording — tap to stop';
 });
 
 api.on('state', ({ state, error, delivered, text }) => {

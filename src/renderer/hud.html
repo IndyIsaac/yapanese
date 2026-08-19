@@ -72,7 +72,19 @@
     transform-origin: center;
     transition: height 70ms linear, opacity 200ms ease;
   }
-  .pill[data-state='transcribing'] .meter i { background: #4a4a5c; }
+  /* Transcribing has no live signal to show, but going still reads as
+     "nothing is happening". The bars run as a travelling wave instead, so
+     there is always visible evidence that the app is still working. */
+  .pill[data-state='transcribing'] .meter i {
+    background: #7c6cf0;
+    transition: none;
+    animation: work 1.15s ease-in-out infinite;
+    animation-delay: calc(var(--i, 0) * 45ms);
+  }
+  @keyframes work {
+    0%, 100% { transform: scaleY(1); opacity: 0.3; }
+    45%      { transform: scaleY(4.2); opacity: 1; }
+  }
 
   .label { font-size: 12.5px; color: #b6b6c4; white-space: nowrap; }
   .time {
