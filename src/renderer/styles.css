@@ -15,6 +15,7 @@
   --accent:      #7c6cf0;
   --accent-hi:   #9384f5;
   --accent-soft: rgba(124, 108, 240, 0.14);
+  --on-accent:   #ffffff;
 
   --live:    #f0616d;
   --good:    #4ade80;
@@ -183,7 +184,7 @@ input::placeholder { color: var(--text-3); }
 }
 .btn:hover { background: var(--surface-3); }
 .btn:active { transform: translateY(1px); }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .btn-primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
 .btn-live { background: var(--live); border-color: var(--live); color: #fff; }
 .btn-live:hover { background: #f47681; border-color: #f47681; }
@@ -393,4 +394,34 @@ select:focus { border-color: var(--accent); outline: none; }
 @keyframes toastIn {
   from { opacity: 0; transform: translateY(8px) scale(.98); }
   to   { opacity: 1; transform: none; }
+}
+
+/* ------------------------------------------------- unfinished recordings */
+
+/* A recording that has audio but no transcript yet. Unlike the others its
+   action is the whole point of the row, so it does not wait for a hover. */
+.entry-pending {
+  border-color: rgba(242, 181, 68, 0.28);
+  background: rgba(242, 181, 68, 0.05);
+}
+.entry-pending:hover { border-color: rgba(242, 181, 68, 0.45); }
+.entry-pending .entry-actions {
+  /* In flow rather than floating over the meta row: these are always shown,
+     so absolutely positioning them would sit them on top of the tag. */
+  position: static;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  margin-top: 11px;
+  gap: 6px;
+}
+.entry-meta .tag-pending { color: var(--warn); }
+.entry-meta .tag-pending svg { color: var(--warn); }
+.pending-note { color: var(--text-3); }
+
+/* Marks the entry a recovery notice pointed at, so the message leads
+   somewhere instead of leaving the user to find it. */
+.entry.found {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }

@@ -1,9 +1,10 @@
 'use strict';
 
 const {
-  app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, shell, nativeImage, screen, dialog,
+  app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, shell, nativeImage, screen,
 } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs');
 const crypto = require('node:crypto');
 
 const { store } = require('./store');
@@ -279,9 +280,15 @@ ipcMain.on('capture:result', async (_e, { sampleRate, sampleCount, peak, rms }) 
   if (!result.ok) {
     // Silence is a normal outcome and there is nothing in the audio worth
     // keeping. Anything else means the words are still only in this file, so
-    // it stays put and is offered back on the next launch.
-    if (result.noSpeech) recorderModule.discard(file.path);
-    else log('recording kept for recovery:', file.path);
+    // it goes into history as unfinished — visible, and transcribable later,
+    // rather than a file the user has no way of knowing about.
+    if (result.noSpeech) {
+      recorderModule.discard(file.path);
+    } else {
+      addUnfinished({ startedAt: recordingStartedAt, durationMs, audioPath: file.path });
+      log('recording kept as an unfinished history entry:', file.path);
+      mainWindow?.webContents.send('history:changed');
+    }
 
     hotkeys?.reset();
     setState('idle', { error: result.error, linger: 4000 });
@@ -346,84 +353,64 @@ function describeLength(seconds) {
 }
 
 /**
- * Transcribe a recording left over from a previous run.
+ * Record audio that has no transcript yet as an ordinary history entry.
  *
- * Deliberately does not paste. The user was talking to some other window
- * minutes or days ago; dropping that text into whatever happens to be focused
- * now would be worse than useless. It goes to history, where they can find it.
+ * Everything that was captured should be findable in one place. A recording
+ * that failed or was interrupted is still something the user said, so it goes
+ * in the list marked unfinished, holding the audio until it is transcribed.
  */
-async function transcribeRecovered(rec) {
-  const settings = store.settings();
-  showMainWindow('history');
-  mainWindow?.webContents.send('toast', {
-    kind: 'good',
-    message: `Transcribing ${describeLength(rec.durationSeconds)} of recovered audio…`,
-  });
-
-  const result = await transcribe({
-    wavPath: rec.path,
-    durationSeconds: rec.durationSeconds,
-    settings,
-  });
-  log('recovered transcribe ->', result.ok ? `ok: ${redact(result.text)}` : `error: ${result.error}`);
-
-  if (!result.ok) {
-    // Kept on disk: a failure here must not be what finally loses the audio.
-    mainWindow?.webContents.send('toast', {
-      kind: 'error',
-      message: `Could not transcribe the recovered recording: ${result.error}`,
-    });
-    return;
-  }
-
-  store.addEntry({
+function addUnfinished({ startedAt, durationMs, audioPath }) {
+  return store.addEntry({
     id: crypto.randomUUID(),
-    startedAt: new Date(rec.startedAt).toISOString(),
-    durationMs: Math.round(rec.durationSeconds * 1000),
-    text: result.text,
+    startedAt: new Date(startedAt).toISOString(),
+    durationMs,
+    text: '',
+    state: 'unfinished',
+    audioPath,
     delivered: 'saved',
-  });
-  recorderModule.discard(rec.path);
-
-  mainWindow?.webContents.send('history:changed');
-  mainWindow?.webContents.send('toast', {
-    kind: 'good',
-    message: 'Recovered recording saved to your history.',
   });
 }
 
-/** Offer back anything a crash or a forced quit left behind. */
-async function offerRecovery() {
+/** Bring anything a crash or a forced quit left behind into history. */
+function importOrphans() {
   const orphans = recorderModule.listOrphans({
     dir: recordingsDir,
     except: recording?.currentPath() ?? null,
   });
-  if (orphans.length === 0) return;
+  if (orphans.length === 0) return [];
 
-  const newest = orphans[0];
-  log('recovery: found', orphans.length, 'unfinished recording(s), newest',
-      `${newest.durationSeconds.toFixed(0)}s`);
-
-  const { response } = await dialog.showMessageBox({
-    type: 'question',
-    title: 'Unfinished recording',
-    message: `Yapanese has ${describeLength(newest.durationSeconds)} of audio from ${new Date(newest.startedAt).toLocaleString()} that was never transcribed.`,
-    detail: orphans.length > 1
-      ? `${orphans.length} unfinished recordings were found. This transcribes the most recent one; the others are kept.`
-      : 'This usually means the app was closed or crashed while it was recording.',
-    buttons: ['Transcribe it', 'Keep for later', 'Delete'],
-    defaultId: 0,
-    cancelId: 1,
-  });
-
-  if (response === 2) {
-    for (const o of orphans) recorderModule.discard(o.path);
-    log('recovery: discarded', orphans.length, 'recording(s) at the user\'s request');
-    return;
+  const known = new Set(store.history().map((e) => e.audioPath).filter(Boolean));
+  const added = [];
+  for (const o of orphans) {
+    if (known.has(o.path)) continue;
+    added.push(addUnfinished({
+      startedAt: o.startedAt,
+      durationMs: Math.round(o.durationSeconds * 1000),
+      audioPath: o.path,
+    }));
   }
-  if (response !== 0) return;
+  if (added.length) log('recovery: imported', added.length, 'unfinished recording(s) into history');
+  return added;
+}
 
-  await transcribeRecovered(newest);
+/**
+ * Tell the window about it rather than putting a dialog in front of everything.
+ * The renderer scrolls to the entry and marks it, so the notice leads somewhere
+ * instead of just being dismissed.
+ */
+function announceRecovered(added) {
+  if (!added.length) return;
+  const seconds = added.reduce((n, e) => n + (e.durationMs || 0), 0) / 1000;
+  const message = added.length === 1
+    ? `Recovered ${describeLength(seconds)} of audio from earlier — it is in your history below.`
+    : `Recovered ${added.length} unfinished recordings — they are in your history below.`;
+
+  const send = () => {
+    mainWindow?.webContents.send('history:changed');
+    mainWindow?.webContents.send('recovered', { ids: added.map((e) => e.id), message });
+  };
+  if (mainWindow && !mainWindow.webContents.isLoading()) send();
+  else mainWindow?.webContents.once('did-finish-load', send);
 }
 
 // ---------------------------------------------------------------- ipc api
@@ -443,9 +430,47 @@ ipcMain.handle('settings:set', (_e, patch) => {
 });
 
 ipcMain.handle('history:get', () => store.history());
-ipcMain.handle('history:delete', (_e, id) => { store.deleteEntry(id); return store.history(); });
-ipcMain.handle('history:clear', () => { store.clearHistory(); return []; });
+// Any audio held by a deleted entry goes with it. Leaving the file behind
+// would bring the entry straight back as a recovery on the next launch.
+ipcMain.handle('history:delete', (_e, id) => {
+  const entry = store.history().find((x) => x.id === id);
+  if (entry?.audioPath) recorderModule.discard(entry.audioPath);
+  store.deleteEntry(id);
+  return store.history();
+});
+
+ipcMain.handle('history:clear', () => {
+  for (const e of store.history()) if (e.audioPath) recorderModule.discard(e.audioPath);
+  store.clearHistory();
+  return [];
+});
 ipcMain.handle('history:copy', (_e, text) => copyToClipboard(text));
+
+/** Turn an unfinished entry into a real transcript, on demand. */
+ipcMain.handle('history:transcribe', async (_e, id) => {
+  const entry = store.history().find((x) => x.id === id);
+  if (!entry?.audioPath) return { ok: false, error: 'That recording is no longer available.' };
+  if (!fs.existsSync(entry.audioPath)) {
+    store.updateEntry(id, { state: 'lost', audioPath: null });
+    return { ok: false, error: 'The audio for that recording is missing.', history: store.history() };
+  }
+
+  const result = await transcribe({
+    wavPath: entry.audioPath,
+    durationSeconds: (entry.durationMs || 0) / 1000,
+    settings: store.settings(),
+  });
+  log('history:transcribe ->', result.ok ? `ok: ${redact(result.text)}` : `error: ${result.error}`);
+
+  if (!result.ok) {
+    // Left as unfinished on purpose: the audio is still the only copy.
+    return { ok: false, error: result.error };
+  }
+
+  store.updateEntry(id, { text: result.text, state: 'done', audioPath: null });
+  recorderModule.discard(entry.audioPath);
+  return { ok: true, history: store.history() };
+});
 
 ipcMain.handle('record:toggle', () => { toggleRecording(); return state; });
 ipcMain.handle('state:get', () => state);
@@ -522,7 +547,8 @@ if (!app.requestSingleInstanceLock()) {
     }
 
     // Last, so a leftover recording never delays the app becoming usable.
-    offerRecovery().catch((err) => log('recovery: failed —', err.message));
+    try { announceRecovered(importOrphans()); }
+    catch (err) { log('recovery: failed —', err.message); }
   });
 
   app.on('will-quit', () => {

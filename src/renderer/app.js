@@ -67,7 +67,7 @@ function toast(kind, message) {
 
 function renderHistory() {
   const q = query.trim().toLowerCase();
-  const list = q ? entries.filter((e) => e.text.toLowerCase().includes(q)) : entries;
+  const list = q ? entries.filter((e) => (e.text || '').toLowerCase().includes(q)) : entries;
 
   el('entry-count').textContent =
     entries.length === 0 ? '' : q ? `${list.length} of ${entries.length}` : `${entries.length}`;
@@ -86,24 +86,38 @@ function renderHistory() {
     return;
   }
 
-  entriesEl.innerHTML = list.map((e) => `
-    <article class="entry" data-id="${e.id}">
+  entriesEl.innerHTML = list.map((e) => {
+    // An entry that holds audio but no text yet: a recording interrupted by a
+    // crash, or one whose transcription failed. It sits in the list like
+    // anything else so nothing that was said is invisible.
+    const pending = e.state === 'unfinished';
+    const lost = e.state === 'lost';
+
+    return `
+    <article class="entry${pending ? ' entry-pending' : ''}" data-id="${e.id}">
       <div class="entry-meta">
         <span>${formatTime(e.startedAt)}</span>
         <span>${formatDuration(e.durationMs)}</span>
-        ${e.delivered === 'pasted'
-          ? `<span class="tag">${ICONS.check} Pasted</span>`
-          : e.delivered === 'copied'
-            ? `<span class="tag">${ICONS.check} Copied</span>`
-            : ''}
+        ${pending ? `<span class="tag tag-pending">${ICONS.warn} Not transcribed</span>`
+          : lost ? `<span class="tag tag-pending">${ICONS.warn} Audio missing</span>`
+          : e.delivered === 'pasted' ? `<span class="tag">${ICONS.check} Pasted</span>`
+          : e.delivered === 'copied' ? `<span class="tag">${ICONS.check} Copied</span>`
+          : ''}
       </div>
-      <div class="entry-body">${highlight(e.text, query.trim())}</div>
+      <div class="entry-body">${
+        pending ? '<span class="pending-note">This recording was interrupted before it could be transcribed. The audio is safe — transcribe it to get the text.</span>'
+        : lost ? '<span class="pending-note">The audio for this recording is no longer on disk.</span>'
+        : highlight(e.text || '', query.trim())
+      }</div>
       <div class="entry-actions">
-        <button class="btn btn-ghost" data-act="copy">${ICONS.copy} Copy</button>
+        ${pending
+          ? `<button class="btn btn-primary" data-act="transcribe">Transcribe</button>`
+          : lost ? ''
+          : `<button class="btn btn-ghost" data-act="copy">${ICONS.copy} Copy</button>`}
         <button class="btn btn-ghost btn-danger" data-act="delete">${ICONS.trash} Delete</button>
       </div>
-    </article>
-  `).join('');
+    </article>`;
+  }).join('');
 }
 
 entriesEl.addEventListener('click', async (ev) => {
@@ -116,10 +130,24 @@ entriesEl.addEventListener('click', async (ev) => {
   if (btn.dataset.act === 'copy') {
     await api.copyText(entry.text);
     toast('good', 'Copied to clipboard.');
-  } else {
-    entries = await api.deleteEntry(id);
-    renderHistory();
+    return;
   }
+
+  if (btn.dataset.act === 'transcribe') {
+    // Can take minutes on a long recording, so the button says so rather
+    // than looking like nothing happened.
+    btn.disabled = true;
+    btn.textContent = 'Transcribing…';
+    const res = await api.transcribeEntry(id);
+    if (res.history) entries = res.history;
+    renderHistory();
+    if (res.ok) toast('good', 'Transcribed and saved to your history.');
+    else toast('error', res.error || 'Could not transcribe that recording.');
+    return;
+  }
+
+  entries = await api.deleteEntry(id);
+  renderHistory();
 });
 
 searchEl.addEventListener('input', () => { query = searchEl.value; renderHistory(); });
@@ -246,6 +274,24 @@ api.on('state', applyState);
 api.on('navigate', showView);
 api.on('toast', ({ kind, message }) => toast(kind, message));
 api.on('history:changed', async () => { entries = await api.getHistory(); renderHistory(); });
+
+/**
+ * A recording recovered from an interrupted session. The notice leads
+ * somewhere — the list scrolls to the entry and marks it — rather than being
+ * a message the user has to go looking for afterwards.
+ */
+api.on('recovered', async ({ ids, message }) => {
+  entries = await api.getHistory();
+  showView('history');
+  renderHistory();
+  toast('good', message);
+
+  const node = ids?.[0] && entriesEl.querySelector(`.entry[data-id="${ids[0]}"]`);
+  if (!node) return;
+  node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  node.classList.add('found');
+  setTimeout(() => node.classList.remove('found'), 2600);
+});
 
 (async function boot() {
   settings = await api.getSettings();

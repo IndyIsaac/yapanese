@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('yapanese', {
   deleteEntry: (id) => ipcRenderer.invoke('history:delete', id),
   clearHistory: () => ipcRenderer.invoke('history:clear'),
   copyText: (text) => ipcRenderer.invoke('history:copy', text),
+  transcribeEntry: (id) => ipcRenderer.invoke('history:transcribe', id),
 
   // recording
   toggleRecording: () => ipcRenderer.invoke('record:toggle'),
@@ -30,7 +31,7 @@ contextBridge.exposeInMainWorld('yapanese', {
 
   // events
   on: (channel, handler) => {
-    const allowed = ['state', 'level', 'navigate', 'toast', 'history:changed', 'capture:start', 'capture:stop', 'lock'];
+    const allowed = ['state', 'level', 'navigate', 'toast', 'history:changed', 'recovered', 'capture:start', 'capture:stop', 'lock'];
     if (!allowed.includes(channel)) return () => {};
     const wrapped = (_e, payload) => handler(payload);
     ipcRenderer.on(channel, wrapped);
