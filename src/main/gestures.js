@@ -13,8 +13,17 @@ const { DEFAULT_COMBO, comboName } = require('./combos');
 
 // A press shorter than this counts as a tap rather than a hold.
 const HOLD_THRESHOLD_MS = 350;
-// A second tap inside this window locks recording on.
-const DOUBLE_TAP_WINDOW_MS = 450;
+/**
+ * How long after releasing a tap a second one still counts as a double tap.
+ *
+ * Measured from the release of the first tap to the *press* of the second,
+ * which is the gap a person actually controls. It used to run to the release
+ * of the second tap, so the whole of that second press had to fit inside the
+ * window too — on a two-key combo that meant pressing and releasing two keys
+ * twice inside 450ms. Missing it did not fail visibly: the recording simply
+ * ended and transcribed, which reads as the overlay vanishing for no reason.
+ */
+const DOUBLE_TAP_WINDOW_MS = 500;
 
 // Both the left and right physical key satisfy a group.
 const COMBO_KEYS = {
@@ -74,23 +83,13 @@ function create({
       endRecording('tap while locked');
       return;
     }
+
+    // The second press of a double tap. Locking here rather than on release
+    // means the confirmation lands the instant the user presses, and the
+    // window only has to cover the gap between taps.
+    const isSecondTap = recording && lastTapAt && (pressedAt - lastTapAt) < DOUBLE_TAP_WINDOW_MS;
     clearTapTimer();
-    beginRecording();
-  }
-
-  function onComboUp() {
-    const heldMs = now() - pressedAt;
-    if (!recording) return;
-
-    if (heldMs >= HOLD_THRESHOLD_MS) {
-      endRecording(`held ${heldMs}ms`);
-      return;
-    }
-
-    // A short tap. A second one inside the window locks recording on;
-    // otherwise this was a lone tap and the recording ends when it lapses.
-    const at = now();
-    if (at - lastTapAt < DOUBLE_TAP_WINDOW_MS) {
+    if (isSecondTap) {
       lastTapAt = 0;
       locked = true;
       onLockChanged?.(true);
@@ -98,7 +97,24 @@ function create({
       return;
     }
 
-    lastTapAt = at;
+    beginRecording();
+  }
+
+  function onComboUp() {
+    if (!recording) return;
+    // Releasing the second tap of a double tap must not stop anything; the
+    // lock is already on and only a fresh press ends it.
+    if (locked) return;
+
+    const heldMs = now() - pressedAt;
+    if (heldMs >= HOLD_THRESHOLD_MS) {
+      endRecording(`held ${heldMs}ms`);
+      return;
+    }
+
+    // A short tap. If a second one arrives inside the window it locks on;
+    // otherwise this was a lone tap and the recording ends when it lapses.
+    lastTapAt = now();
     clearTapTimer();
     tapTimer = setTimer(() => {
       tapTimer = null;

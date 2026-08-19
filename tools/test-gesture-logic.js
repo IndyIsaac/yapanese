@@ -79,6 +79,32 @@ function harness() {
   check('tap while locked -> unlock + finish', h.events, ['start', 'lock', 'unlock', 'finish']);
 }
 
+// 4b. A slower double tap still locks. Under the old rule the window ran to
+// the release of the second tap, so this gap plus the second press exceeded
+// it and the recording silently ended instead — the "it just disappears" bug.
+{
+  const h = harness();
+  h.comboDown(); h.advance(120); h.comboUp();
+  h.advance(400);
+  h.comboDown();
+  check('slow double tap -> still locks', h.events, ['start', 'lock']);
+  check('locks on the second press, before release', h.g.isLocked(), true);
+  h.advance(120); h.comboUp();
+  h.advance(3000);
+  check('stays recording after the second release', h.events, ['start', 'lock']);
+}
+
+// 4c. Past the window it is two separate gestures, not a lock.
+{
+  const h = harness();
+  h.comboDown(); h.advance(100); h.comboUp();
+  h.advance(700);
+  check('lone tap finishes once the window lapses', h.events, ['start', 'finish']);
+  h.comboDown();
+  check('a later tap starts a fresh recording', h.events, ['start', 'finish', 'start']);
+  check('and does not lock', h.g.isLocked(), false);
+}
+
 // 5. Non-combo keys are ignored entirely (the privacy claim).
 {
   const h = harness();
