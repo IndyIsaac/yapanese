@@ -3,6 +3,10 @@ name: Build
 on:
   push:
     branches: [main]
+    # Without this the workflow never runs on a tag, so the installer job
+    # below — which is gated on being a tag — could never fire and releases
+    # were never actually built.
+    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
