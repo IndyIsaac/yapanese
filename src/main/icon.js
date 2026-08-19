@@ -15,9 +15,10 @@ const { nativeImage } = require('electron');
  * thing the pill does: red while recording, violet while transcribing.
  */
 const COLORS = {
-  idle:         [0xb4, 0xb4, 0xc2],
-  recording:    [0xf0, 0x61, 0x6d],
-  transcribing: [0x7c, 0x6c, 0xf0],
+  idle:         [0x9a, 0x9a, 0xa2],
+  recording:    [0xe8, 0x42, 0x2f],
+  // A dimmed accent rather than a second hue: still working, no longer live.
+  transcribing: [0xa8, 0x4d, 0x3c],
 };
 
 const cache = new Map();

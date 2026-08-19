@@ -23,12 +23,12 @@ $path.CloseFigure()
 $ground = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
   (New-Object System.Drawing.Point(0,0)),
   (New-Object System.Drawing.Point($size,$size)),
-  [System.Drawing.Color]::FromArgb(255, 32, 30, 46),
-  [System.Drawing.Color]::FromArgb(255, 18, 18, 24))
+  [System.Drawing.Color]::FromArgb(255, 26, 26, 29),
+  [System.Drawing.Color]::FromArgb(255, 11, 11, 12))
 $g.FillPath($ground, $path)
 
 # Microphone glyph in the accent violet.
-$accent = [System.Drawing.Color]::FromArgb(255, 124, 108, 240)
+$accent = [System.Drawing.Color]::FromArgb(255, 232, 66, 47)
 $brush  = New-Object System.Drawing.SolidBrush($accent)
 $pen    = New-Object System.Drawing.Pen($accent, 15)
 $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round

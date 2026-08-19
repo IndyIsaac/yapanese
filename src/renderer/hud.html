@@ -27,11 +27,11 @@
        to stay inside them rather than growing with its content. */
     max-width: calc(100vw - 24px);
     box-sizing: border-box;
-    background: rgba(23, 23, 29, 0.94);
+    background: rgba(19, 19, 21, 0.94);
     border: 1px solid rgba(255, 255, 255, 0.09);
     backdrop-filter: blur(18px) saturate(1.3);
     box-shadow: 0 18px 44px -10px rgba(0, 0, 0, 0.8), 0 2px 8px rgba(0, 0, 0, 0.5);
-    color: #f2f2f5;
+    color: #f4f4f5;
     transform: translateY(10px) scale(0.97);
     opacity: 0;
     transition: transform 260ms cubic-bezier(.22,1,.36,1), opacity 200ms ease-out;
@@ -39,27 +39,27 @@
   .pill.in { transform: none; opacity: 1; }
 
   /* state lamp */
-  .lamp { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: #85859a; }
+  .lamp { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: #82828c; }
   .pill[data-state='recording'] .lamp {
-    background: #f0616d;
-    box-shadow: 0 0 0 0 rgba(240, 97, 109, 0.55);
+    background: #e8422f;
+    box-shadow: 0 0 0 0 rgba(232, 66, 47, 0.55);
     animation: ping 1.8s cubic-bezier(.22,1,.36,1) infinite;
   }
   @keyframes ping {
-    0%   { box-shadow: 0 0 0 0 rgba(240,97,109,.5); }
-    70%  { box-shadow: 0 0 0 8px rgba(240,97,109,0); }
-    100% { box-shadow: 0 0 0 0 rgba(240,97,109,0); }
+    0%   { box-shadow: 0 0 0 0 rgba(232,66,47,.5); }
+    70%  { box-shadow: 0 0 0 8px rgba(232,66,47,0); }
+    100% { box-shadow: 0 0 0 0 rgba(232,66,47,0); }
   }
   .pill[data-state='done'] .lamp { background: #4ade80; }
-  .pill[data-state='error'] .lamp { background: #f0616d; }
+  .pill[data-state='error'] .lamp { background: #e8422f; }
 
   /* Locked recording gets a steady ring instead of the pulse, so a glance
      tells you whether it stops when you let go or keeps running. */
   .pill[data-locked='true'] .lamp {
     animation: none;
-    box-shadow: 0 0 0 3px rgba(240, 97, 109, 0.28);
+    box-shadow: 0 0 0 3px rgba(232, 66, 47, 0.30);
   }
-  .pill[data-locked='true'] { border-color: rgba(240, 97, 109, 0.4); }
+  .pill[data-locked='true'] { border-color: rgba(232, 66, 47, 0.45); }
 
   /* the meter is the signature: real levels, not a decorative loop */
   .meter { display: flex; align-items: center; gap: 2.5px; height: 22px; flex: 1; min-width: 0; }
@@ -68,7 +68,7 @@
     width: 2.5px;
     min-height: 2.5px;
     border-radius: 2px;
-    background: #7c6cf0;
+    background: #e8422f;
     transform-origin: center;
     transition: height 70ms linear, opacity 200ms ease;
   }
@@ -76,7 +76,7 @@
      "nothing is happening". The bars run as a travelling wave instead, so
      there is always visible evidence that the app is still working. */
   .pill[data-state='transcribing'] .meter i {
-    background: #7c6cf0;
+    background: #e8422f;
     transition: none;
     animation: work 1.15s ease-in-out infinite;
     animation-delay: calc(var(--i, 0) * 45ms);
@@ -86,23 +86,17 @@
     45%      { transform: scaleY(4.2); opacity: 1; }
   }
 
-  .label { font-size: 12.5px; color: #b6b6c4; white-space: nowrap; }
+  .label { font-size: 12.5px; color: #b4b4bb; white-space: nowrap; }
   .time {
-    font-size: 12.5px; color: #f2f2f5;
+    font-size: 12.5px; color: #f4f4f5;
     font-variant-numeric: tabular-nums;
     min-width: 34px; text-align: right;
     flex: 0 0 auto;
   }
 
-  /* transcribing: bars settle and a sweep runs through them */
+  /* The bars themselves carry the transcribing animation now. A gradient
+     sweeping over them as well read as a solid block sitting on the meter. */
   .sweep { position: relative; overflow: hidden; }
-  .pill[data-state='transcribing'] .sweep::after {
-    content: '';
-    position: absolute; inset: 0;
-    background: linear-gradient(90deg, transparent, rgba(124,108,240,.85), transparent);
-    animation: sweep 1.1s cubic-bezier(.4,0,.6,1) infinite;
-  }
-  @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
 
   .msg {
     font-size: 12.5px;
@@ -111,9 +105,9 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: #b6b6c4;
+    color: #b4b4bb;
   }
-  .pill[data-state='error'] .msg { color: #f4919a; }
+  .pill[data-state='error'] .msg { color: #ff8b7a; }
   .pill[data-state='done'] .msg { color: #a7e8bd; }
 
   /* Once recording stops there is no live signal to show, and leaving the
