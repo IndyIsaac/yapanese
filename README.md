@@ -8,8 +8,8 @@
 
 No account. No cloud. No per-minute billing. Nothing leaves your machine.
 
-[![Build](https://github.com/Vibeypirate/yapanese/actions/workflows/build.yml/badge.svg)](https://github.com/Vibeypirate/yapanese/actions/workflows/build.yml)
-[![Release](https://img.shields.io/github/v/release/Vibeypirate/yapanese?color=7c6cf0&label=download)](https://github.com/Vibeypirate/yapanese/releases/latest)
+[![Build](https://github.com/IndyIsaac/yapanese/actions/workflows/build.yml/badge.svg)](https://github.com/IndyIsaac/yapanese/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/IndyIsaac/yapanese?color=7c6cf0&label=download)](https://github.com/IndyIsaac/yapanese/releases/latest)
 [![Licence](https://img.shields.io/badge/licence-MIT-7c6cf0)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-2a2a35)
 
@@ -66,10 +66,10 @@ that window to the actual clip — most of the distance between "instant" and
 
 ## Install
 
-Download the installer from [**Releases**](https://github.com/Vibeypirate/yapanese/releases/latest), or build it:
+Download the installer from [**Releases**](https://github.com/IndyIsaac/yapanese/releases/latest), or build it:
 
 ```powershell
-git clone https://github.com/Vibeypirate/yapanese.git
+git clone https://github.com/IndyIsaac/yapanese.git
 cd yapanese
 npm install
 npm run dist       # -> dist\Yapanese Setup <version>.exe
