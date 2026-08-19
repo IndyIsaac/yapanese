@@ -109,8 +109,15 @@ function createHud() {
 
   hud.webContents.on('did-finish-load', () => log('hud: loaded'));
   hud.webContents.on('did-fail-load', (_e, code, desc) => log('hud: FAILED TO LOAD', code, desc));
-  hud.webContents.on('console-message', (_e, level, message, line, source) => {
-    log(`hud console[${level}]:`, message, `(${String(source).split(/[\\/]/).pop()}:${line})`);
+  // Electron 37 moved these fields onto the event object and deprecated the
+  // positional arguments, which still arrive in 43. Prefer the object so this
+  // keeps working when they are finally dropped.
+  hud.webContents.on('console-message', (details, level, message, line, source) => {
+    const lvl = details?.level ?? level;
+    const msg = details?.message ?? message;
+    const ln = details?.lineNumber ?? line;
+    const src = details?.sourceId ?? source;
+    log(`hud console[${lvl}]:`, msg, `(${String(src).split(/[\\/]/).pop()}:${ln})`);
   });
   hud.webContents.on('render-process-gone', (_e, details) => log('hud: RENDERER GONE', details));
 }
