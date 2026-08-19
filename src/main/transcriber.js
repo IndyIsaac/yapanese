@@ -1,11 +1,7 @@
 'use strict';
 
-const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
-const crypto = require('node:crypto');
 const { run, locate } = require('./tools');
-const { encodeWav } = require('./wav');
 const whisper = require('./whisper');
 
 /**
@@ -34,7 +30,7 @@ async function findYap(override) {
  * uses whisper's default beam search over the full 30-second context — but it
  * keeps Yapanese working on a machine that has yap but not whisper-cli.
  */
-async function viaYap({ samples, sampleRate, settings }) {
+async function viaYap({ wavPath, settings }) {
   const yap = await findYap(settings.yapPath);
   if (!yap) {
     return {
@@ -44,29 +40,22 @@ async function viaYap({ samples, sampleRate, settings }) {
     };
   }
 
-  const file = path.join(os.tmpdir(), `yapanese-${crypto.randomUUID()}.wav`);
-  fs.writeFileSync(file, encodeWav(samples, sampleRate));
+  const args = ['transcribe', wavPath];
+  if (settings.model) args.push('--model', settings.model);
 
-  try {
-    const args = ['transcribe', file];
-    if (settings.model) args.push('--model', settings.model);
+  // yap shells out to whisper-cli and ffmpeg and finds them on PATH. They
+  // are normally installed beside yap itself, which is not necessarily on
+  // the PATH this process inherited, so its own directory goes first.
+  const env = { ...process.env, PATH: `${path.dirname(yap)};${process.env.PATH || ''}` };
+  if (settings.ffmpegPath) env.YAP_FFMPEG = settings.ffmpegPath;
 
-    // yap shells out to whisper-cli and ffmpeg and finds them on PATH. They
-    // are normally installed beside yap itself, which is not necessarily on
-    // the PATH this process inherited, so its own directory goes first.
-    const env = { ...process.env, PATH: `${path.dirname(yap)};${process.env.PATH || ''}` };
-    if (settings.ffmpegPath) env.YAP_FFMPEG = settings.ffmpegPath;
-
-    const started = Date.now();
-    const res = await run(yap, args, { env });
-    if (!res.ok) {
-      const detail = (res.stderr || '').trim().split(/\r?\n/).filter(Boolean).slice(-3).join(' ');
-      return { ok: false, error: detail || `yap exited with code ${res.code}` };
-    }
-    return { ok: true, text: res.stdout.replace(/\r/g, '').trim(), elapsedMs: Date.now() - started };
-  } finally {
-    fs.rm(file, { force: true }, () => {});
+  const started = Date.now();
+  const res = await run(yap, args, { env });
+  if (!res.ok) {
+    const detail = (res.stderr || '').trim().split(/\r?\n/).filter(Boolean).slice(-3).join(' ');
+    return { ok: false, error: detail || `yap exited with code ${res.code}` };
   }
+  return { ok: true, text: res.stdout.replace(/\r/g, '').trim(), elapsedMs: Date.now() - started };
 }
 
 /**
@@ -76,16 +65,16 @@ async function viaYap({ samples, sampleRate, settings }) {
  * 16 kHz mono audio whisper wants, so going through yap would add two process
  * spawns and a redundant ffmpeg conversion for no benefit.
  */
-async function transcribe({ samples, sampleRate, settings }) {
+async function transcribe({ wavPath, durationSeconds, settings }) {
   // Test affordance: lets the capture -> delivery path be exercised without
   // needing real speech into the microphone.
   if (process.env.YAPANESE_FAKE_TRANSCRIPT) {
     return { ok: true, text: process.env.YAPANESE_FAKE_TRANSCRIPT, elapsedMs: 0 };
   }
 
-  let result = await whisper.transcribe({ samples, sampleRate, settings });
+  let result = await whisper.transcribe({ wavPath, durationSeconds, settings });
   if (!result.ok && result.missing) {
-    result = await viaYap({ samples, sampleRate, settings });
+    result = await viaYap({ wavPath, settings });
   }
 
   if (!result.ok) return result;
@@ -101,4 +90,4 @@ async function transcribe({ samples, sampleRate, settings }) {
   return { ok: true, text, elapsedMs: result.elapsedMs, command: result.command };
 }
 
-module.exports = { transcribe, encodeWav, findYap, isNonSpeech };
+module.exports = { transcribe, findYap, isNonSpeech };

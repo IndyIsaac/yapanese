@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('yapanese', {
   openDataDir: () => ipcRenderer.invoke('open:dataDir'),
 
   // capture (HUD window only)
+  sendChunk: (bytes) => ipcRenderer.send('capture:chunk', bytes),
   sendResult: (payload) => ipcRenderer.send('capture:result', payload),
   sendError: (message) => ipcRenderer.send('capture:error', { message }),
   sendLevel: (level) => ipcRenderer.send('capture:level', level),

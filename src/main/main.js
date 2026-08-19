@@ -1,7 +1,7 @@
 'use strict';
 
 const {
-  app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, shell, nativeImage, screen,
+  app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, shell, nativeImage, screen, dialog,
 } = require('electron');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -13,10 +13,15 @@ const { locate } = require('./tools');
 const { makeTrayIcon } = require('./icon');
 const { log, redact, reset: resetLog, FILE: LOG_FILE } = require('./log');
 const hotkeysModule = require('./hotkeys');
+const recorderModule = require('./recorder');
 
 let mainWindow = null;
 let hud = null;
 let tray = null;
+
+/** The recording currently being written to disk. Created once app is ready. */
+let recording = null;
+let recordingsDir = null;
 
 /** idle | recording | transcribing */
 let state = 'idle';
@@ -150,6 +155,18 @@ async function startRecording() {
   if (state !== 'idle') return;
   const settings = store.settings();
   recordingStartedAt = Date.now();
+
+  // Opened before the renderer is told to capture, so the first chunk to
+  // arrive already has somewhere to land.
+  try {
+    const { path: file } = recording.start();
+    log('recording ->', file);
+  } catch (err) {
+    log('recording: could not open a file —', err.message);
+    setState('idle', { error: `Could not start recording: ${err.message}`, linger: 4000 });
+    return;
+  }
+
   setState('recording');
   hud?.webContents.send('capture:start', {
     deviceLabel: settings.micDevice,
@@ -222,21 +239,50 @@ function buildTray() {
 
 // ---------------------------------------------------------------- pipeline
 
-ipcMain.on('capture:result', async (_e, { samples, sampleRate, peak, rms }) => {
+/**
+ * Audio arrives roughly once a second and goes straight to disk, so neither
+ * process holds more than a second of it however long the recording runs.
+ */
+ipcMain.on('capture:chunk', (_e, bytes) => {
+  if (!recording?.isOpen()) return;
+  try {
+    recording.append(Buffer.from(bytes));
+  } catch (err) {
+    log('recording: append failed —', err.message);
+  }
+});
+
+ipcMain.on('capture:result', async (_e, { sampleRate, sampleCount, peak, rms }) => {
   const durationMs = Date.now() - recordingStartedAt;
   const settings = store.settings();
-  log('capture:result —', samples?.byteLength ?? samples?.length ?? 0, 'bytes @', sampleRate,
-      'Hz | peak =', (peak ?? 0).toFixed(4), '| rms =', (rms ?? 0).toFixed(5));
 
-  const buffer = Buffer.from(samples);
-  const int16 = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 2);
+  const file = recording?.finish();
+  if (!file) {
+    log('capture:result — no recording was open');
+    hotkeys?.reset();
+    setState('idle', { error: 'The recording was lost before it could be saved.', linger: 4000 });
+    return;
+  }
+  log('capture:result —', `${(file.bytes / 1048576).toFixed(1)} MB on disk,`,
+      `${file.durationSeconds.toFixed(1)}s @`, sampleRate, 'Hz | peak =',
+      (peak ?? 0).toFixed(4), '| rms =', (rms ?? 0).toFixed(5));
 
-  const result = await transcribe({ samples: int16, sampleRate, settings });
+  const result = await transcribe({
+    wavPath: file.path,
+    durationSeconds: file.durationSeconds,
+    settings,
+  });
   if (result.command) log('command:', result.command);
   log('transcribe ->', result.ok ? `ok in ${result.elapsedMs}ms: ${redact(result.text)}`
                                  : `error: ${result.error}`);
 
   if (!result.ok) {
+    // Silence is a normal outcome and there is nothing in the audio worth
+    // keeping. Anything else means the words are still only in this file, so
+    // it stays put and is offered back on the next launch.
+    if (result.noSpeech) recorderModule.discard(file.path);
+    else log('recording kept for recovery:', file.path);
+
     hotkeys?.reset();
     setState('idle', { error: result.error, linger: 4000 });
     mainWindow?.webContents.send('toast', { kind: 'error', message: result.error });
@@ -251,6 +297,9 @@ ipcMain.on('capture:result', async (_e, { samples, sampleRate, peak, rms }) => {
     text: result.text,
     delivered: 'saved',
   });
+
+  // The transcript is safely in history now, so the audio has done its job.
+  recorderModule.discard(file.path);
 
   const delivery = settings.autoPaste
     ? await pasteIntoFocusedApp(result.text, () => hotkeys.paste())
@@ -276,6 +325,9 @@ ipcMain.on('capture:result', async (_e, { samples, sampleRate, peak, rms }) => {
 
 ipcMain.on('capture:error', (_e, { message }) => {
   log('capture:error —', message);
+  // A failed or silent capture has nothing worth recovering, so the file is
+  // thrown away rather than offered back on the next launch.
+  recording?.abort();
   hotkeys?.reset();
   setState('idle', { error: message, linger: 4000 });
   mainWindow?.webContents.send('toast', { kind: 'error', message });
@@ -284,6 +336,95 @@ ipcMain.on('capture:error', (_e, { message }) => {
 ipcMain.on('capture:level', (_e, level) => {
   hud?.webContents.send('level', level);
 });
+
+// ---------------------------------------------------------------- recovery
+
+function describeLength(seconds) {
+  if (seconds < 90) return `${Math.round(seconds)} seconds`;
+  const mins = Math.round(seconds / 60);
+  return `${mins} minute${mins === 1 ? '' : 's'}`;
+}
+
+/**
+ * Transcribe a recording left over from a previous run.
+ *
+ * Deliberately does not paste. The user was talking to some other window
+ * minutes or days ago; dropping that text into whatever happens to be focused
+ * now would be worse than useless. It goes to history, where they can find it.
+ */
+async function transcribeRecovered(rec) {
+  const settings = store.settings();
+  showMainWindow('history');
+  mainWindow?.webContents.send('toast', {
+    kind: 'good',
+    message: `Transcribing ${describeLength(rec.durationSeconds)} of recovered audio…`,
+  });
+
+  const result = await transcribe({
+    wavPath: rec.path,
+    durationSeconds: rec.durationSeconds,
+    settings,
+  });
+  log('recovered transcribe ->', result.ok ? `ok: ${redact(result.text)}` : `error: ${result.error}`);
+
+  if (!result.ok) {
+    // Kept on disk: a failure here must not be what finally loses the audio.
+    mainWindow?.webContents.send('toast', {
+      kind: 'error',
+      message: `Could not transcribe the recovered recording: ${result.error}`,
+    });
+    return;
+  }
+
+  store.addEntry({
+    id: crypto.randomUUID(),
+    startedAt: new Date(rec.startedAt).toISOString(),
+    durationMs: Math.round(rec.durationSeconds * 1000),
+    text: result.text,
+    delivered: 'saved',
+  });
+  recorderModule.discard(rec.path);
+
+  mainWindow?.webContents.send('history:changed');
+  mainWindow?.webContents.send('toast', {
+    kind: 'good',
+    message: 'Recovered recording saved to your history.',
+  });
+}
+
+/** Offer back anything a crash or a forced quit left behind. */
+async function offerRecovery() {
+  const orphans = recorderModule.listOrphans({
+    dir: recordingsDir,
+    except: recording?.currentPath() ?? null,
+  });
+  if (orphans.length === 0) return;
+
+  const newest = orphans[0];
+  log('recovery: found', orphans.length, 'unfinished recording(s), newest',
+      `${newest.durationSeconds.toFixed(0)}s`);
+
+  const { response } = await dialog.showMessageBox({
+    type: 'question',
+    title: 'Unfinished recording',
+    message: `Yapanese has ${describeLength(newest.durationSeconds)} of audio from ${new Date(newest.startedAt).toLocaleString()} that was never transcribed.`,
+    detail: orphans.length > 1
+      ? `${orphans.length} unfinished recordings were found. This transcribes the most recent one; the others are kept.`
+      : 'This usually means the app was closed or crashed while it was recording.',
+    buttons: ['Transcribe it', 'Keep for later', 'Delete'],
+    defaultId: 0,
+    cancelId: 1,
+  });
+
+  if (response === 2) {
+    for (const o of orphans) recorderModule.discard(o.path);
+    log('recovery: discarded', orphans.length, 'recording(s) at the user\'s request');
+    return;
+  }
+  if (response !== 0) return;
+
+  await transcribeRecovered(newest);
+}
 
 // ---------------------------------------------------------------- ipc api
 
@@ -341,6 +482,9 @@ if (!app.requestSingleInstanceLock()) {
     resetLog();
     log('app ready — log at', LOG_FILE);
 
+    recordingsDir = path.join(app.getPath('userData'), 'recordings');
+    recording = recorderModule.create({ dir: recordingsDir });
+
     // Instrumentation: record every permission the renderers ask for, so a
     // silent denial shows up in the log rather than as "nothing happened".
     const { session } = require('electron');
@@ -376,11 +520,20 @@ if (!app.requestSingleInstanceLock()) {
       if (mainWindow && !mainWindow.webContents.isLoading()) warn();
       else mainWindow?.webContents.once('did-finish-load', warn);
     }
+
+    // Last, so a leftover recording never delays the app becoming usable.
+    offerRecovery().catch((err) => log('recovery: failed —', err.message));
   });
 
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
     hotkeys?.stop();
+    // Quitting mid-recording keeps the audio and closes the file properly, so
+    // it comes back as a clean recovery rather than a repaired one.
+    if (recording?.isOpen()) {
+      const left = recording.finish();
+      log('quit while recording —', `${left.durationSeconds.toFixed(0)}s kept at`, left.path);
+    }
   });
   app.on('window-all-closed', (e) => e.preventDefault()); // tray app: stay alive
 }

@@ -23,15 +23,16 @@ const { locate, listMicrophones } = require('../src/main/tools');
 
   if (!yap) process.exit(1);
 
-  // Strip the 44-byte canonical WAV header and read the PCM payload.
-  const buf = fs.readFileSync(wavPath);
-  const pcm = new Int16Array(buf.buffer, buf.byteOffset + 44, (buf.length - 44) / 2);
-  console.log(`\n--- transcribing ${path.basename(wavPath)} (${pcm.length} samples) ---`);
+  // The WAV goes to the transcriber as a path — the audio is never loaded
+  // into memory here, which is the same route the app itself takes now.
+  const dataBytes = Math.max(0, fs.statSync(wavPath).size - 44);
+  const durationSeconds = dataBytes / 2 / 16000;
+  console.log(`\n--- transcribing ${path.basename(wavPath)} (${durationSeconds.toFixed(1)}s) ---`);
 
   const started = Date.now();
   const res = await transcribe({
-    samples: pcm,
-    sampleRate: 16000,
+    wavPath,
+    durationSeconds,
     settings: { yapPath: '', model: '' },
   });
 

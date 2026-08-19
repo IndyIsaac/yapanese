@@ -20,11 +20,19 @@ const bars = Array.from({ length: BAR_COUNT }, (_, i) => {
   return b;
 });
 
+// Audio is handed to the main process about once a second and appended to a
+// file there, rather than being held here until the user stops. Keeping a
+// whole recording in the renderer cost roughly 275 MB an hour and meant a
+// crash lost everything said so far.
+const FLUSH_SAMPLES = SAMPLE_RATE;
+
 let audioContext = null;
 let mediaStream = null;
 let workletNode = null;
-let chunks = [];
+let pending = [];
+let pendingSamples = 0;
 let totalSamples = 0;
+let sumSquares = 0;
 let startedAt = 0;
 let ticker = null;
 let levels = new Array(BAR_COUNT).fill(0);
@@ -63,14 +71,55 @@ function renderLevel(peak) {
   }
 }
 
+/**
+ * Convert everything buffered so far to 16-bit PCM and hand it over.
+ *
+ * The running energy total is accumulated here rather than at the end,
+ * because by then the samples are gone — they are on disk, not in memory.
+ */
+function flush() {
+  if (pendingSamples === 0) return;
+
+  const pcm = new Int16Array(pendingSamples);
+  let offset = 0;
+  for (const chunk of pending) {
+    for (let i = 0; i < chunk.length; i++) {
+      const v = Math.max(-1, Math.min(1, chunk[i]));
+      sumSquares += v * v;
+      pcm[offset++] = v < 0 ? v * 0x8000 : v * 0x7fff;
+    }
+  }
+
+  totalSamples += pendingSamples;
+  pending = [];
+  pendingSamples = 0;
+  api.sendChunk(new Uint8Array(pcm.buffer));
+}
+
 function resetMeter() {
   levels = new Array(BAR_COUNT).fill(0);
   bars.forEach((b) => { b.style.height = '3px'; b.style.opacity = '0.35'; });
 }
 
+// Memory is no longer what limits a long recording — the audio goes to disk
+// as it arrives. What still costs is turning it into text at the end, and
+// finding that out after an hour of talking is too late to be useful.
+const LONG_RECORDING_MS = 30 * 60 * 1000;
+let longNoteShown = false;
+
 function tick() {
-  const s = Math.floor((Date.now() - startedAt) / 1000);
-  timeEl.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  const ms = Date.now() - startedAt;
+  const s = Math.floor(ms / 1000);
+  const mm = Math.floor(s / 60);
+  // Past an hour, minutes alone stop reading as a duration.
+  timeEl.textContent = mm < 60
+    ? `${mm}:${String(s % 60).padStart(2, '0')}`
+    : `${Math.floor(mm / 60)}:${String(mm % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
+  if (!longNoteShown && ms >= LONG_RECORDING_MS && pill.dataset.locked === 'true') {
+    longNoteShown = true;
+    msgEl.textContent = 'Long recording — transcribing will take a while';
+  }
 }
 
 /**
@@ -101,9 +150,12 @@ let skipSilenceGuard = false;
 async function start({ deviceLabel, skipSilence }) {
   skipSilenceGuard = !!skipSilence;
   try {
-    chunks = [];
+    pending = [];
+    pendingSamples = 0;
     totalSamples = 0;
+    sumSquares = 0;
     loudestPeak = 0;
+    longNoteShown = false;
     currentDeviceLabel = deviceLabel || '';
     pill.dataset.locked = 'false';
     msgEl.hidden = true;
@@ -134,10 +186,11 @@ async function start({ deviceLabel, skipSilence }) {
     const source = audioContext.createMediaStreamSource(mediaStream);
     workletNode = new AudioWorkletNode(audioContext, 'collector');
     workletNode.port.onmessage = ({ data }) => {
-      chunks.push(data.samples);
-      totalSamples += data.samples.length;
+      pending.push(data.samples);
+      pendingSamples += data.samples.length;
       if (data.peak > loudestPeak) loudestPeak = data.peak;
       renderLevel(data.peak);
+      if (pendingSamples >= FLUSH_SAMPLES) flush();
     };
 
     // The worklet has no output; connecting to the destination anyway keeps
@@ -173,7 +226,10 @@ function teardown() {
 
 function stop() {
   const rate = audioContext?.sampleRate || SAMPLE_RATE;
-  const collected = chunks;
+
+  // Hand over whatever has not been flushed yet before the graph goes away,
+  // otherwise the last second of the recording is lost.
+  flush();
   const count = totalSamples;
 
   teardown();
@@ -191,17 +247,6 @@ function stop() {
     return;
   }
 
-  // Float32 [-1,1] to signed 16-bit PCM, accumulating energy as we go.
-  const pcm = new Int16Array(count);
-  let offset = 0;
-  let sumSquares = 0;
-  for (const chunk of collected) {
-    for (let i = 0; i < chunk.length; i++) {
-      const v = Math.max(-1, Math.min(1, chunk[i]));
-      sumSquares += v * v;
-      pcm[offset++] = v < 0 ? v * 0x8000 : v * 0x7fff;
-    }
-  }
   const rms = Math.sqrt(sumSquares / count);
 
   if (rms < SILENCE_RMS_THRESHOLD && !skipSilenceGuard) {
@@ -213,9 +258,10 @@ function stop() {
     return;
   }
 
+  // The audio itself is already on disk; this only reports what was captured.
   api.sendResult({
-    samples: new Uint8Array(pcm.buffer),
     sampleRate: rate,
+    sampleCount: count,
     peak: loudestPeak,
     rms,
   });

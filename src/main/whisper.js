@@ -5,7 +5,6 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { run, locate } = require('./tools');
-const { encodeWav } = require('./wav');
 
 /**
  * Speed presets.
@@ -161,12 +160,17 @@ function resolveModel(settings) {
 }
 
 /**
- * Transcribe PCM samples by invoking whisper-cli directly.
+ * Transcribe a WAV file by invoking whisper-cli directly.
  *
  * Yapanese already produces 16 kHz mono audio, which is exactly what whisper
  * wants, so there is no decode step and nothing for ffmpeg to do.
+ *
+ * The file is written by the recorder as the audio arrives and is owned by
+ * the caller — this does not create or delete it. Holding the whole
+ * recording in memory to write it here cost about 275 MB an hour and put a
+ * ceiling on how long anyone could talk.
  */
-async function transcribe({ samples, sampleRate, settings, onProgress }) {
+async function transcribe({ wavPath, durationSeconds, settings, onProgress }) {
   const exe = await locate('whisper-cli', settings.whisperPath);
   if (!exe) return { ok: false, error: 'whisper-cli was not found.', missing: true };
 
@@ -174,11 +178,12 @@ async function transcribe({ samples, sampleRate, settings, onProgress }) {
   if (!fs.existsSync(model)) {
     return { ok: false, error: `Model not found at ${model}`, missing: true };
   }
+  if (!fs.existsSync(wavPath)) {
+    return { ok: false, error: 'The recording could not be found on disk.' };
+  }
 
   const preset = PRESETS[settings.speed] || PRESETS.balanced;
-  const base = path.join(os.tmpdir(), `yapanese-${crypto.randomUUID()}`);
-  const wav = `${base}.wav`;
-  fs.writeFileSync(wav, encodeWav(samples, sampleRate));
+  const wav = wavPath;
 
   const args = [
     '-m', model,
@@ -194,7 +199,7 @@ async function transcribe({ samples, sampleRate, settings, onProgress }) {
     '-l', settings.language && settings.language !== 'auto' ? settings.language : 'en',
   ];
   if (preset.trimContext) {
-    const ac = audioContextFor(samples.length / sampleRate);
+    const ac = audioContextFor(durationSeconds);
     if (ac > 0) args.push('-ac', String(ac));
   }
 
@@ -210,22 +215,18 @@ async function transcribe({ samples, sampleRate, settings, onProgress }) {
     args.push('-vp', '60');
   }
 
-  try {
-    const started = Date.now();
-    const res = await run(exe, args, { env: { ...process.env, PATH: `${path.dirname(exe)};${process.env.PATH || ''}` } });
-    const elapsedMs = Date.now() - started;
-    onProgress?.({ args, elapsedMs });
+  const started = Date.now();
+  const res = await run(exe, args, { env: { ...process.env, PATH: `${path.dirname(exe)};${process.env.PATH || ''}` } });
+  const elapsedMs = Date.now() - started;
+  onProgress?.({ args, elapsedMs });
 
-    if (!res.ok) {
-      const detail = (res.stderr || '').trim().split(/\r?\n/).filter(Boolean).slice(-2).join(' ');
-      return { ok: false, error: detail || `whisper-cli exited with code ${res.code}` };
-    }
-
-    const text = res.stdout.replace(/\r/g, '').trim();
-    return { ok: true, text, elapsedMs, args };
-  } finally {
-    fs.rm(wav, { force: true }, () => {});
+  if (!res.ok) {
+    const detail = (res.stderr || '').trim().split(/\r?\n/).filter(Boolean).slice(-2).join(' ');
+    return { ok: false, error: detail || `whisper-cli exited with code ${res.code}` };
   }
+
+  const text = res.stdout.replace(/\r/g, '').trim();
+  return { ok: true, text, elapsedMs, args };
 }
 
 module.exports = {
