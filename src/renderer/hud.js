@@ -51,15 +51,71 @@ let loudestPeak = 0;
 // labels non-speech explicitly and an amplitude threshold cannot.
 const SILENCE_RMS_THRESHOLD = 0.002;
 
-function setState(state, message) {
+const wrap = document.getElementById('wrap');
+const snippetEl = document.getElementById('snippet');
+
+/**
+ * The one pending timer.
+ *
+ * Every transition goes through here, and setting a new one cancels the old.
+ * Bare setTimeout(hide, …) calls scattered across the states is what made the
+ * pill vanish at random: a result from one dictation would schedule a hide,
+ * the user would start talking again inside that window, and the stale timer
+ * would fire and blank a recording that was very much still running.
+ */
+let pendingTimer = null;
+
+function later(fn, ms) {
+  clearTimeout(pendingTimer);
+  pendingTimer = setTimeout(fn, ms);
+}
+
+function cancelPending() {
+  clearTimeout(pendingTimer);
+  pendingTimer = null;
+}
+
+/** Ask the main process to wrap the window around whatever is now drawn. */
+function fit() {
+  requestAnimationFrame(() => {
+    const r = wrap.getBoundingClientRect();
+    api.hudResize(Math.ceil(r.width), Math.ceil(r.height));
+  });
+}
+
+function setState(state, message, snippet) {
   pill.dataset.state = state;
   msgEl.hidden = !message;
   if (message) msgEl.textContent = message;
-  timeEl.hidden = state === 'error' || state === 'done';
+  snippetEl.hidden = !snippet;
+  if (snippet) snippetEl.textContent = snippet;
+  timeEl.hidden = state === 'error' || state === 'done' || state === 'idle';
+  fit();
 }
 
-function show() { requestAnimationFrame(() => pill.classList.add('in')); }
-function hide() { pill.classList.remove('in'); }
+function show() {
+  cancelPending();
+  requestAnimationFrame(() => pill.classList.add('in'));
+}
+
+/**
+ * Back to the resting state.
+ *
+ * When the indicator is left on screen this is a shape change rather than a
+ * disappearance; the main process decides which, and only hides the window
+ * if the user turned the indicator off.
+ */
+let ready = true;
+
+function idleLabel() {
+  return ready ? 'Ready' : 'Setup needed';
+}
+
+function settle() {
+  cancelPending();
+  setState('idle', idleLabel());
+  api.hudSettled();
+}
 
 function renderLevel(peak) {
   levels.push(Math.min(1, peak * 2.6));
@@ -209,7 +265,7 @@ async function start({ deviceLabel, skipSilence }) {
         ? 'Microphone access was denied. Allow it in Windows Settings › Privacy › Microphone.'
         : `Could not start recording: ${err?.message || err}`
     );
-    setTimeout(hide, 3200);
+    later(settle, 3600);
   }
 }
 
@@ -225,6 +281,7 @@ function teardown() {
 }
 
 function stop() {
+  cancelPending();
   const rate = audioContext?.sampleRate || SAMPLE_RATE;
 
   // Hand over whatever has not been flushed yet before the graph goes away,
@@ -243,7 +300,7 @@ function stop() {
   if (count === 0) {
     setState('error', 'Nothing recorded');
     api.sendError('No audio was captured. Check that the right microphone is selected.');
-    setTimeout(hide, 3200);
+    later(settle, 3600);
     return;
   }
 
@@ -254,7 +311,7 @@ function stop() {
     api.sendError(
       `That recording was too quiet to transcribe. Yapanese is listening to "${currentDeviceLabel || 'the system default'}" — check the microphone in Settings if that is wrong.`
     );
-    setTimeout(hide, 3600);
+    later(settle, 4000);
     return;
   }
 
@@ -267,6 +324,98 @@ function stop() {
   });
 }
 
+// ------------------------------------------------------------- interaction
+
+/**
+ * The window ignores the mouse by default so an indicator that is always on
+ * screen does not eat clicks meant for what is behind it. Electron forwards
+ * move events while it does, which is how the pill knows the pointer has
+ * arrived and can ask for the mouse back.
+ */
+let interactive = false;
+
+function setInteractive(on) {
+  if (on === interactive) return;
+  interactive = on;
+  api.hudInteractive(on);
+}
+
+document.addEventListener('mousemove', (e) => {
+  if (dragging) return;
+  const r = pill.getBoundingClientRect();
+  setInteractive(
+    e.clientX >= r.left && e.clientX <= r.right &&
+    e.clientY >= r.top && e.clientY <= r.bottom
+  );
+});
+// The forwarded stream stops at the window edge, so a pointer that leaves
+// quickly can miss the final move event and leave the window grabbing clicks.
+document.addEventListener('mouseleave', () => { if (!dragging) setInteractive(false); });
+
+// ------------------------------------------------------------------- drag
+
+let dragging = false;
+let movedWhileDown = false;
+let pressedAt = null;
+
+/** Below this, a press is a click with a shaky hand rather than a drag.
+ *  Without it, one stray pixel of movement swallowed the click. */
+const DRAG_SLOP = 4;
+
+/**
+ * Pointer events with capture, not mouse events.
+ *
+ * The window slides out from under the pointer while it is being dragged, and
+ * plain mouse events stop arriving the moment the cursor is outside it — so a
+ * quick drag lost the pointer, the pill stopped following, and the mouseup
+ * that should have ended the drag never came. Capturing the pointer routes
+ * every move and the release back here no matter where the cursor goes.
+ *
+ * The movement itself is the main process's job; all this decides is when the
+ * drag starts and stops, and whether the press was really a click.
+ */
+function endDrag(pointerId) {
+  if (!dragging) return;
+  dragging = false;
+  pill.classList.remove('dragging');
+  if (pointerId != null && pill.hasPointerCapture(pointerId)) {
+    pill.releasePointerCapture(pointerId);
+  }
+  api.hudDragEnd();
+  // Resizes are refused while a drag is in flight, so anything that changed
+  // the pill's size in the meantime is applied now.
+  fit();
+  // A press that did not move the pill is a click, not a drag: it opens the
+  // transcript the pill is reporting on.
+  if (!movedWhileDown) api.hudOpen();
+}
+
+pill.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  dragging = true;
+  movedWhileDown = false;
+  pressedAt = { x: e.screenX, y: e.screenY };
+  pill.setPointerCapture(e.pointerId);
+  pill.classList.add('dragging');
+  api.hudDragStart();
+  e.preventDefault();
+});
+
+pill.addEventListener('pointermove', (e) => {
+  if (!dragging || movedWhileDown) return;
+  if (Math.abs(e.screenX - pressedAt.x) > DRAG_SLOP ||
+      Math.abs(e.screenY - pressedAt.y) > DRAG_SLOP) {
+    movedWhileDown = true;
+  }
+});
+
+pill.addEventListener('pointerup', (e) => endDrag(e.pointerId));
+// Capture can be taken away — the window losing focus, the pointer being
+// cancelled by the system. Without this the drag would keep running with
+// nothing left to stop it.
+pill.addEventListener('pointercancel', (e) => endDrag(e.pointerId));
+pill.addEventListener('lostpointercapture', () => endDrag(null));
+
 api.on('capture:start', start);
 api.on('capture:stop', stop);
 
@@ -278,22 +427,68 @@ api.on('lock', (locked) => {
   // Says "recording" rather than "locked": the thing the user needs
   // confirming is that it is still listening, not what mode it is in.
   if (locked) msgEl.textContent = 'Recording — tap to stop';
+  fit();
 });
+
+/** How long a finished result stays up before the pill goes back to idle.
+ *  A pasted transcript is already where it was wanted, so the confirmation
+ *  can be brief. A copied one is a job the user still has to finish, and it
+ *  should not expire while they are still looking away from the screen. */
+const LINGER_PASTED = 2200;
+const LINGER_COPIED = 7000;
+
+let lastLinger = LINGER_PASTED;
 
 api.on('state', ({ state, error, delivered, text }) => {
   if (state !== 'idle') return;
 
   if (error) {
-    // The window is a fixed width, so a long message is trimmed here rather
-    // than being silently cut off by the window edge. The full text still
-    // reaches the main window as a toast.
-    setState('error', error.length > 62 ? `${error.slice(0, 60)}…` : error);
-    setTimeout(hide, 3200);
+    // The pill grows to fit its message now, but a whole paragraph of error
+    // would still run off the screen. The full text reaches the main window
+    // as a toast either way.
+    setState('error', error.length > 70 ? `${error.slice(0, 68)}…` : error);
+    show();
+    later(settle, 4200);
     return;
   }
 
-  const words = text ? text.trim().split(/\s+/).filter(Boolean).length : 0;
-  const verb = delivered === 'pasted' ? 'Pasted' : 'Copied';
-  setState('done', words ? `${verb} · ${words} word${words === 1 ? '' : 's'}` : verb);
-  setTimeout(hide, 1800);
+  const trimmed = (text || '').trim();
+  const words = trimmed ? trimmed.split(/\s+/).filter(Boolean).length : 0;
+  const pasted = delivered === 'pasted';
+  const verb = pasted ? 'Pasted' : 'Copied';
+
+  // Show the words themselves when they were only copied. "Copied · 34 words"
+  // confirms that something was transcribed; the transcript confirms it heard
+  // the right thing — which is the actual question when nothing appeared in
+  // the app you were typing into.
+  const preview = !pasted && trimmed
+    ? (trimmed.length > 60 ? `${trimmed.slice(0, 58)}…` : trimmed)
+    : '';
+
+  setState('done', words ? `${verb} · ${words} word${words === 1 ? '' : 's'}` : verb, preview);
+  show();
+  lastLinger = pasted ? LINGER_PASTED : LINGER_COPIED;
+  later(settle, lastLinger);
 });
+
+// The main process has its own view of how long a result should linger; it
+// wins when it sends one, so the two cannot disagree about when the pill
+// goes back to idle.
+api.on('hud:linger', ({ ms }) => {
+  if (pill.dataset.state === 'recording' || pill.dataset.state === 'transcribing') return;
+  later(settle, Math.max(ms, lastLinger));
+});
+
+// Resting state from the moment the window loads, rather than the app being
+// invisible until the first time the shortcut is pressed.
+api.on('readiness', (info) => {
+  ready = !!info.ready;
+  pill.dataset.ready = String(ready);
+  if (pill.dataset.state === 'idle') setState('idle', idleLabel());
+});
+
+setState('idle', idleLabel());
+show();
+// Inter arrives after first paint, and the width measured with the fallback
+// font is not the width the pill ends up being.
+document.fonts?.ready.then(fit);

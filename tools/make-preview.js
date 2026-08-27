@@ -38,9 +38,44 @@ window.yapanese = {
     yap: 'C:\\\\Users\\\\you\\\\AppData\\\\Local\\\\yap\\\\bin\\\\yap.exe',
     ffmpeg: 'C:\\\\Program Files\\\\ffmpeg\\\\bin\\\\ffmpeg.exe',
     dataDir: 'C:\\\\Users\\\\you\\\\AppData\\\\Roaming\\\\Yapanese',
-    hotkeyRegistered: true, version: '0.1.0', electron: '33.4.11',
+    whisperCli: 'C:\\\\Users\\\\you\\\\AppData\\\\Local\\\\yap\\\\bin\\\\whisper-cli.exe',
+    hotkeyRegistered: true, version: '0.4.0', electron: '43.4.1',
   }),
   openDataDir: () => {},
+
+  // Setup: shown as already complete, which is what a preview of the app in
+  // normal use should look like. Flip \`ready\` and the \`installed\` flags to
+  // preview the first-run screen instead.
+  inspectSetup: async () => ({
+    ready: true,
+    engine: { installed: true, kind: 'cuda', path: 'C:\\\\Users\\\\you\\\\AppData\\\\Local\\\\yap\\\\bin\\\\whisper-cli.exe', release: 'b4938' },
+    gpu: { nvidia: true },
+    recommended: 'cuda',
+    engines: [
+      { id: 'cpu', label: 'CPU', bytes: 8361840,
+        note: 'Runs the transcription on your processor. Works on any machine, small download.' },
+      { id: 'cuda', label: 'NVIDIA GPU', bytes: 671045732,
+        note: 'Runs it on your graphics card instead — roughly three times faster. Large, because it includes NVIDIA\\u2019s CUDA libraries.' },
+    ],
+    models: [
+      { id: 'speech', label: 'Speech model', bytes: 574041195, required: true, installed: true,
+        note: 'The trained model whisper.cpp reads — this is the part that knows what words sound like. large-v3-turbo, quantised.' },
+      { id: 'vad', label: 'Voice detection model', bytes: 885098, required: true, installed: true,
+        note: 'Silero. Discards room noise so it never becomes invented text.' },
+      { id: 'fast', label: 'Fast model', bytes: 77704715, required: false, installed: false,
+        note: 'tiny.en. Only used by the Fast quality setting — skip it unless you want that.' },
+    ],
+    binDir: 'C:\\\\Users\\\\you\\\\AppData\\\\Local\\\\yap\\\\bin',
+    modelsDir: 'C:\\\\Users\\\\you\\\\AppData\\\\Local\\\\yap\\\\models',
+  }),
+  runSetup: async () => ({ ok: true }),
+  cancelSetup: async () => ({ ok: true }),
+
+  getUpdate: async () => ({ state: 'none' }),
+  checkUpdate: async () => ({ state: 'none' }),
+  downloadUpdate: async () => ({ ok: true }),
+  installUpdate: async () => ({ ok: true }),
+
   on: () => () => {},
 };
 navigator.mediaDevices.getUserMedia = async () => ({ getTracks: () => [] });

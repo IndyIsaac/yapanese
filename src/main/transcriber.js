@@ -32,13 +32,7 @@ async function findYap(override) {
  */
 async function viaYap({ wavPath, settings }) {
   const yap = await findYap(settings.yapPath);
-  if (!yap) {
-    return {
-      ok: false,
-      error:
-        'Neither whisper-cli nor yap could be found. Put one of them on your PATH, or in %LOCALAPPDATA%\\yap\\bin.',
-    };
-  }
+  if (!yap) return { ok: false, absent: true, error: 'yap was not found.' };
 
   const args = ['transcribe', wavPath];
   if (settings.model) args.push('--model', settings.model);
@@ -73,11 +67,30 @@ async function transcribe({ wavPath, durationSeconds, settings }) {
   }
 
   let result = await whisper.transcribe({ wavPath, durationSeconds, settings });
-  if (!result.ok && result.missing) {
-    result = await viaYap({ wavPath, settings });
+
+  // yap is a fallback for a machine that has it but not whisper-cli. It is no
+  // use when the binary is there and a model is not, and reaching for it then
+  // is what used to report a missing model as a missing program.
+  if (!result.ok && result.missing === 'engine') {
+    const fallback = await viaYap({ wavPath, settings });
+    if (!fallback.absent) result = fallback;
   }
 
-  if (!result.ok) return result;
+  if (!result.ok) {
+    // Something the user can act on, rather than a failure they have to
+    // diagnose: setup knows how to fetch either of these.
+    if (result.missing) {
+      return {
+        ok: false,
+        setupRequired: true,
+        missing: result.missing,
+        error: result.missing === 'engine'
+          ? 'whisper.cpp is not installed yet — Yapanese needs it to transcribe.'
+          : result.error,
+      };
+    }
+    return result;
+  }
   if (result.args) result.command = `whisper-cli ${result.args.slice(2).join(' ')}`;
 
   const text = (result.text || '').trim();

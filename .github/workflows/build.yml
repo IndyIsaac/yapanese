@@ -67,6 +67,23 @@ jobs:
       # GitHub on its own, and fails asking for a token — two publishers for
       # one release.
       - run: npm run dist -- --publish never
+
+      # latest.yml is the update feed: it carries the version, the installer
+      # filename and its sha512, and without it in the release the app has no
+      # way to discover that this version exists. The blockmap next to it is
+      # what lets an update download only the parts that changed instead of
+      # the whole 100 MB installer.
+      - name: Check the update feed was produced
+        run: |
+          if (-not (Test-Path dist/latest.yml)) {
+            throw "latest.yml is missing — electron-builder needs a publish provider configured for auto-update to work"
+          }
+          Get-Content dist/latest.yml
+        shell: pwsh
+
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.exe
+          files: |
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
