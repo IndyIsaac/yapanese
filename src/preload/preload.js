@@ -19,9 +19,28 @@ contextBridge.exposeInMainWorld('yapanese', {
   toggleRecording: () => ipcRenderer.invoke('record:toggle'),
   getState: () => ipcRenderer.invoke('state:get'),
 
+  // setup
+  inspectSetup: () => ipcRenderer.invoke('setup:inspect'),
+  runSetup: (choice) => ipcRenderer.invoke('setup:install', choice),
+  cancelSetup: () => ipcRenderer.invoke('setup:cancel'),
+
+  // updates
+  getUpdate: () => ipcRenderer.invoke('update:get'),
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+
   // diagnostics
   diagnostics: () => ipcRenderer.invoke('diagnostics'),
   openDataDir: () => ipcRenderer.invoke('open:dataDir'),
+
+  // hud chrome (HUD window only)
+  hudResize: (width, height) => ipcRenderer.send('hud:resize', { width, height }),
+  hudDragStart: () => ipcRenderer.send('hud:drag-start'),
+  hudDragEnd: () => ipcRenderer.send('hud:drag-end'),
+  hudInteractive: (on) => ipcRenderer.send('hud:interactive', on),
+  hudSettled: () => ipcRenderer.send('hud:settled'),
+  hudOpen: () => ipcRenderer.send('hud:open'),
 
   // capture (HUD window only)
   sendChunk: (bytes) => ipcRenderer.send('capture:chunk', bytes),
@@ -31,7 +50,7 @@ contextBridge.exposeInMainWorld('yapanese', {
 
   // events
   on: (channel, handler) => {
-    const allowed = ['state', 'level', 'navigate', 'toast', 'history:changed', 'recovered', 'capture:start', 'capture:stop', 'lock'];
+    const allowed = ['state', 'level', 'navigate', 'toast', 'history:changed', 'recovered', 'capture:start', 'capture:stop', 'lock', 'setup:progress', 'readiness', 'hud:linger', 'update:status'];
     if (!allowed.includes(channel)) return () => {};
     const wrapped = (_e, payload) => handler(payload);
     ipcRenderer.on(channel, wrapped);

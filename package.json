@@ -1,7 +1,7 @@
 {
   "name": "yapanese",
   "productName": "Yapanese",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "description": "Local dictation for Windows. Hold a key, talk, and the text lands where your cursor is.",
   "main": "src/main/main.js",
   "author": "Indy",
@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@fontsource/inter": "^5.1.0",
+    "electron-updater": "^6.8.9",
     "uiohook-napi": "^1.5.5"
   },
   "build": {
@@ -38,8 +39,16 @@
       "node_modules/@fontsource/inter/files/inter-latin-600-normal.woff2",
       "node_modules/@fontsource/inter/LICENSE",
       "node_modules/uiohook-napi/**/*",
+      "node_modules/{electron-updater,builder-util-runtime,fs-extra,graceful-fs,jsonfile,universalify,js-yaml,argparse,lazy-val,lodash.escaperegexp,lodash.isequal,semver,tiny-typed-emitter,debug,ms,sax}/**/*",
       "LICENSE",
       "THIRD-PARTY.md"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "IndyIsaac",
+        "repo": "yapanese"
+      }
     ],
     "win": {
       "target": [
@@ -68,7 +77,10 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Yapanese",
-      "uninstallDisplayName": "Yapanese"
+      "uninstallDisplayName": "Yapanese",
+      "artifactName": "Yapanese-Setup-${version}.${ext}",
+      "include": "build/installer.nsh",
+      "runAfterFinish": true
     }
   }
 }

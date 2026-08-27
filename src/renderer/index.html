@@ -33,6 +33,13 @@
       </svg>
       Settings
     </button>
+    <button data-view="setup">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3v11"/><path d="M8 10.5l4 3.5 4-3.5"/><path d="M4 17v2.5h16V17"/>
+      </svg>
+      Setup
+      <span class="nav-dot" id="setup-dot" hidden></span>
+    </button>
   </div>
 
   <div class="rail-foot">
@@ -51,6 +58,25 @@
 
 <main class="main">
   <div class="topbar"></div>
+
+  <!-- Above every view: an update is about the app, not about whatever
+       screen you happen to be looking at. -->
+  <div class="update-bar" id="update-bar" hidden>
+    <span class="update-mark">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 18v2h16v-2"/>
+      </svg>
+    </span>
+    <div class="update-text">
+      <b id="update-title">An update is available</b>
+      <span id="update-note"></span>
+    </div>
+    <div class="update-progress" id="update-progress" hidden><div class="update-fill" id="update-fill"></div></div>
+    <button class="btn btn-primary" id="update-action">Update</button>
+    <button class="btn btn-ghost" id="update-dismiss" title="Not now">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
 
   <!-- ------------------------------------------------------ history -->
   <section class="view on" id="view-history">
@@ -166,6 +192,24 @@
         </div>
 
         <div class="group">
+          <h3>On-screen indicator</h3>
+          <div class="field">
+            <div class="label">
+              <b>Keep it on screen</b>
+              <span>The small pill that shows whether Yapanese is listening. Drag it anywhere; it stays where you put it. Turn this off to only show it while dictating.</span>
+            </div>
+            <div class="control"><input class="switch" type="checkbox" id="indicator"></div>
+          </div>
+          <div class="field">
+            <div class="label">
+              <b>Where it sits</b>
+              <span id="indicator-pos">Bottom centre of the main display.</span>
+            </div>
+            <div class="control"><button class="btn" id="indicator-reset">Reset position</button></div>
+          </div>
+        </div>
+
+        <div class="group">
           <h3>System</h3>
           <div class="field">
             <div class="label">
@@ -191,9 +235,88 @@
         </div>
 
         <div class="group">
+          <h3>Updates</h3>
+          <div class="field">
+            <div class="label">
+              <b id="update-version">Yapanese</b>
+              <span id="update-state">Checked automatically.</span>
+            </div>
+            <div class="control"><button class="btn" id="update-check">Check now</button></div>
+          </div>
+        </div>
+
+        <div class="group">
           <h3>Diagnostics</h3>
           <div class="field" style="display:block">
             <div class="diag" id="diag"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- -------------------------------------------------------- setup -->
+  <section class="view" id="view-setup">
+    <div class="view-head">
+      <h2>Setup</h2>
+      <span class="count" id="setup-state-label"></span>
+    </div>
+    <div class="scroll">
+      <div class="settings">
+
+        <div class="setup-lede" id="setup-lede">
+          <h3>Yapanese needs two more things</h3>
+          <p>
+            Transcription is done by <b>whisper.cpp</b> — a separate program — and a
+            <b>speech model</b>, the file that actually knows what words sound like.
+            Neither ships with the installer: together they are far larger than the app,
+            and which build is right depends on this machine.
+          </p>
+          <p>Fetched once, then it all runs offline.</p>
+        </div>
+
+        <div class="group" id="setup-engine-group">
+          <h3>Engine</h3>
+          <p class="group-note">
+            <b>whisper.cpp</b> is the program that turns recorded audio into text. It runs
+            on this machine and does the actual listening — Yapanese records your voice,
+            hands it over, and types back what it heard.
+          </p>
+          <p class="group-note">
+            Both builds below produce the same words. The difference is what does the
+            work: your processor, or your graphics card. The NVIDIA build is bigger
+            because it carries NVIDIA's own maths libraries with it.
+          </p>
+          <div class="choices" id="setup-engines"></div>
+        </div>
+
+        <div class="group">
+          <h3>Components</h3>
+          <div class="components" id="setup-components"></div>
+        </div>
+
+        <div class="group" id="setup-extras-group">
+          <h3>Optional</h3>
+          <div class="components" id="setup-extras"></div>
+        </div>
+
+        <div class="setup-bar">
+          <button class="btn btn-primary" id="setup-run">Download and set up</button>
+          <button class="btn" id="setup-cancel" hidden>Cancel</button>
+          <span class="setup-total" id="setup-total"></span>
+        </div>
+
+        <div class="note" id="setup-manual">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 8.5v5"/><circle cx="12" cy="16.8" r=".9" fill="currentColor" stroke="none"/><path d="M10.3 3.9L2.6 17.2A1.9 1.9 0 0 0 4.3 20h15.4a1.9 1.9 0 0 0 1.7-2.8L13.7 3.9a1.9 1.9 0 0 0-3.4 0z"/>
+          </svg>
+          <div>
+            <b>Prefer to do this yourself?</b> Put <code>whisper-cli.exe</code> on your
+            <code>PATH</code> or in <span id="setup-bindir">the yap bin folder</span>, and the
+            models in <span id="setup-modeldir">the models folder</span>. Yapanese will find them.
+            Every download here is pinned to a published release and checked against a
+            SHA-256 before it is installed.
           </div>
         </div>
 

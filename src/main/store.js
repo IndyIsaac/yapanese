@@ -18,6 +18,8 @@ const DEFAULT_SETTINGS = {
   launchAtLogin: false,
   speed: 'balanced',          // 'accurate' | 'balanced' | 'fast'
   vad: true,                  // discard non-speech before transcribing
+  showIndicator: true,        // keep the dictation pill on screen when idle
+  hudPosition: null,          // {x, y} once the user has dragged it somewhere
   language: 'en',
   threads: 0,                 // 0 = derive from CPU count
   model: '',                  // '' = the preset's model

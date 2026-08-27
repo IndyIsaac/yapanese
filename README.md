@@ -18,7 +18,7 @@ No account. No cloud. No per-minute billing. Nothing leaves your machine.
   <img src="https://img.shields.io/badge/Download%20for%20Windows-e8422f?style=for-the-badge&logo=windows&logoColor=white&labelColor=1a1a1d" alt="Download for Windows" height="42">
 </a>
 
-<sub>Windows 10 or 11, 64-bit · no account, no sign-up · one prerequisite, see below</sub>
+<sub>Windows 10 or 11, 64-bit · no account, no sign-up · sets itself up on first launch</sub>
 
 <br>
 
@@ -73,12 +73,33 @@ that window to the actual clip — most of the distance between "instant" and
 
 ## Install
 
+Two steps. The installer is the first one.
+
+### 1 · Install the app
+
 **[Download the installer](https://github.com/IndyIsaac/yapanese/releases/latest)** and run it. No
 cloning, no toolchain, no build step — it installs to your user account, so it
 does not ask for administrator rights.
 
 Windows will warn you on first run because the installer is unsigned; see
 [Honest limitations](#honest-limitations).
+
+### 2 · Let it set itself up
+
+Yapanese opens on a setup screen the first time you run it. It checks what
+your machine already has and downloads the rest — the transcription engine and
+the speech model. Press one button and wait about a minute.
+
+> **Dictation does not work until this finishes.** The shortcut, the tray
+> item and the Record button are all disabled until it does, deliberately:
+> a recording that cannot be transcribed is a thought you have already said
+> out loud and cannot get back.
+
+It picks the NVIDIA build if it finds a suitable card and the CPU build
+otherwise, and you can override that. Everything it downloads is pinned to a
+published release and checked against a SHA-256 before it is installed.
+
+After that, the app makes no network requests at all.
 
 <details>
 <summary>Or build it from source</summary>
@@ -97,18 +118,46 @@ does not have this problem.
 
 </details>
 
-### One prerequisite
+### What setup installs
 
-Yapanese needs [`whisper-cli`](https://github.com/ggml-org/whisper.cpp/releases)
-from whisper.cpp, on your `PATH` or in `%LOCALAPPDATA%\yap\bin`.
+| | | |
+|---|---|---|
+| **whisper.cpp** | 8 MB · CPU<br>640 MB · CUDA | The program that transcribes. Lands in `%LOCALAPPDATA%\yap\bin`. |
+| **Speech model** | 547 MB | `large-v3-turbo-q5_0`. Lands in `%LOCALAPPDATA%\yap\models`. |
+| **Voice detection** | 865 KB | Silero, so room noise never becomes invented text. |
 
-For GPU acceleration, take one of the `cublas` release builds instead of the
-plain one. The first run pays a one-time CUDA compilation cost — if it is slow
-once and fast forever after, that is why.
+The CUDA build is large because it carries NVIDIA's own libraries, and worth
+it: 2.0 s becomes 0.8 s on the clip in the table above. Its first run pays a
+one-time CUDA compilation cost — if it is slow once and fast forever after,
+that is why.
 
-Models download themselves on first use into `%LOCALAPPDATA%\yap\models`:
-`large-v3-turbo-q5_0` (547 MB) for speech and Silero (865 KB) for voice
-detection. After that, the app makes no network requests at all.
+<details>
+<summary>Or install the prerequisites yourself</summary>
+
+Setup is a convenience, not a requirement. Put
+[`whisper-cli`](https://github.com/ggml-org/whisper.cpp/releases) on your
+`PATH` or in `%LOCALAPPDATA%\yap\bin`, and the
+[models](https://huggingface.co/ggerganov/whisper.cpp) in
+`%LOCALAPPDATA%\yap\models`, and Yapanese will find them and skip the screen
+entirely. It only ever removes files it installed itself.
+
+`node tools/test-setup.js` reports what it can see, and
+`--install` runs the same code the screen does, without the UI.
+
+</details>
+
+<details>
+<summary>Uninstalling</summary>
+
+The uninstaller removes the app. It deliberately leaves
+`%LOCALAPPDATA%\yap` alone — that folder is shared with the `yap` CLI if you
+have it, and silently deleting somebody else's tool is not the uninstaller's
+call. Delete it by hand to reclaim the download.
+
+Your transcripts live separately in `%APPDATA%\Yapanese` and are also left
+behind, so reinstalling keeps your history.
+
+</details>
 
 ## Usage
 
@@ -153,10 +202,63 @@ double-tap is possible with them.
 | Ignore background noise | on | Voice activity detection |
 | Transcription quality | Balanced | Accurate · Balanced · Fast |
 | Paste automatically | on | Off copies to clipboard instead |
+| Keep the indicator on screen | on | Off shows it only while dictating |
 | Start with Windows | off | Launches hidden in the tray |
+
+### The indicator
+
+The pill sits at the bottom of the screen and tells you what the app is
+doing. Drag it anywhere — it stays where you put it, and comes back there
+next launch. Clicking it opens your history.
+
+It is deliberately present when idle rather than appearing only once you
+start talking: an indicator you cannot see is indistinguishable from an app
+that has stopped working. If it is genuinely in the way, turn it off in
+Settings and it reverts to showing only while dictating.
+
+When a transcript is copied rather than pasted, the pill shows the opening
+words and stays up longer, so you can tell it heard you correctly without
+opening anything.
 
 Transcripts live as plain JSON in `%APPDATA%\Yapanese` — readable, portable and
 deletable without this app being involved.
+
+## Updates
+
+Yapanese checks GitHub for a newer release a few seconds after launch and
+every six hours after that. When there is one, a bar appears at the top of the
+window: what the version is, one line on what changed, and a button.
+
+Nothing is downloaded until that button is pressed. An app that quietly pulls
+a hundred megabytes over somebody's tethered connection has made a decision
+that was not its to make — and this one is otherwise careful never to touch
+the network. Once downloaded, the update applies on a restart, which the app
+does for you.
+
+<details>
+<summary>Cutting a release</summary>
+
+The version in `package.json` is what the update check compares against, so
+it has to go up, and the tag has to match it.
+
+```powershell
+npm version minor        # or patch — writes package.json and commits
+git push origin main --follow-tags
+```
+
+The tag triggers `.github/workflows/build.yml`, which builds the installer and
+attaches three things to the release: the `.exe`, its `.blockmap`, and
+`latest.yml`. **All three matter.** `latest.yml` is the feed — without it in
+the release, existing installs have no way to discover the new version and
+will silently never update. The blockmap is what lets an update download only
+the changed parts rather than the whole installer. The workflow fails loudly
+if `latest.yml` was not produced.
+
+Whatever you write in the GitHub release body is what users see as the "what
+changed" line, so the first line should be a sentence a non-technical person
+can act on.
+
+</details>
 
 ## Honest limitations
 
@@ -167,7 +269,10 @@ deletable without this app being involved.
   discarded immediately, nothing is logged or stored, and nothing is
   transmitted — but it is a real capability and you should know it is there.
 - **The installer is unsigned.** SmartScreen will warn on first run until the
-  binary builds reputation. Signing needs a certificate.
+  binary builds reputation. Signing needs a certificate. Updates are verified
+  by SHA-512 against the release feed rather than by a signature, which
+  protects against a corrupted download but not against a compromised GitHub
+  account.
 - **Accuracy depends on your microphone.** A far-field webcam mic works — that
   is what the demo was recorded with — but a close mic is better, as with any
   speech recognition.
@@ -175,8 +280,14 @@ deletable without this app being involved.
 ## Contributing
 
 Issues and pull requests are welcome. `npm start` runs it from source;
-`tools/` holds the scripts used to test the capture, paste and gesture paths
-without needing a human to speak into the microphone.
+`tools/` holds the scripts used to test the capture, paste, gesture and setup
+paths without needing a human to speak into the microphone.
+
+Bumping the pinned whisper.cpp release means editing `WHISPER_RELEASE` in
+`src/main/setup.js` along with the byte counts and SHA-256 of each artifact —
+`Get-FileHash -Algorithm SHA256` produces them, and
+`node tools/test-setup.js --install` proves they are right against the real
+endpoints.
 
 ## Credits
 

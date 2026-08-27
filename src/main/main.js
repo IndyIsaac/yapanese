@@ -11,6 +11,8 @@ const { store } = require('./store');
 const { transcribe } = require('./transcriber');
 const { pasteIntoFocusedApp, copyToClipboard } = require('./delivery');
 const { locate } = require('./tools');
+const setup = require('./setup');
+const updater = require('./updater');
 const { makeTrayIcon } = require('./icon');
 const { log, redact, reset: resetLog, FILE: LOG_FILE } = require('./log');
 const hotkeysModule = require('./hotkeys');
@@ -27,6 +29,34 @@ let recordingsDir = null;
 /** idle | recording | transcribing */
 let state = 'idle';
 let recordingStartedAt = 0;
+
+// The pill is drawn by the renderer and the window is wrapped around it.
+// These are the starting bounds and the floor a resize request is held to —
+// the renderer measures the real width, which changes with the message.
+const HUD_HEIGHT = 46;
+const HUD_MIN_WIDTH = 108;
+const HUD_MAX_WIDTH = 480;
+
+/**
+ * Whether whisper.cpp and the models are actually present.
+ *
+ * Until they are, dictation is refused rather than attempted. Recording first
+ * and failing afterwards is the worst version of this: the user has already
+ * spoken, the words are stuck in a file, and the error arrives at the moment
+ * they expected text. Better to say so before they start talking.
+ */
+let ready = false;
+
+async function refreshReadiness() {
+  const info = await setup.inspect();
+  ready = info.ready;
+  mainWindow?.webContents.send('readiness', { ready, setup: info });
+  // The pill says what the app can do. An indicator that reads "Ready" on a
+  // machine that cannot transcribe a word is worse than no indicator.
+  hud?.webContents.send('readiness', { ready });
+  updateTray();
+  return info;
+}
 
 // ---------------------------------------------------------------- windows
 
@@ -80,19 +110,51 @@ function createMainWindow() {
  * `focusable: false` is what keeps the principle intact: the app must never
  * take focus from the window that is about to receive the text.
  */
+/**
+ * Keep a saved position on a screen that still exists.
+ *
+ * The position is remembered across sessions, and between sessions a laptop
+ * gets undocked, a monitor gets unplugged, or the resolution changes. A
+ * remembered point can easily end up outside every display, which looks
+ * exactly like the indicator having vanished.
+ */
+function clampToDisplay(x, y, w, h) {
+  const target = screen.getDisplayNearestPoint({ x, y }) || screen.getPrimaryDisplay();
+  const area = target.workArea;
+  return {
+    x: Math.round(Math.min(Math.max(x, area.x), area.x + area.width - w)),
+    y: Math.round(Math.min(Math.max(y, area.y), area.y + area.height - h)),
+  };
+}
+
+/** Where the pill sits when the user has never moved it: bottom centre of the
+ *  primary display, clear of the taskbar. */
+function defaultHudPosition(w, h) {
+  const area = screen.getPrimaryDisplay().workArea;
+  return {
+    x: Math.round(area.x + (area.width - w) / 2),
+    y: Math.round(area.y + area.height - h - 18),
+  };
+}
+
 function createHud() {
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  // Wide enough that a result or error message fits without being clipped by
-  // the window bounds; the pill itself stays centred and only as wide as its
-  // content needs.
-  const w = 460;
-  const h = 96;
+  // Sized to the compact idle pill. The renderer measures its own content and
+  // asks for a resize whenever that changes, so the window stays wrapped
+  // around what is drawn rather than being a fixed rectangle that clips a
+  // long message and swallows clicks around a short one.
+  const w = HUD_MIN_WIDTH;
+  const h = HUD_HEIGHT;
+
+  const saved = store.settings().hudPosition;
+  const at = saved
+    ? clampToDisplay(saved.x, saved.y, w, h)
+    : defaultHudPosition(w, h);
 
   hud = new BrowserWindow({
     width: w,
     height: h,
-    x: Math.round((width - w) / 2),
-    y: height - h - 56,
+    x: at.x,
+    y: at.y,
     frame: false,
     transparent: true,
     resizable: false,
@@ -111,7 +173,29 @@ function createHud() {
 
   hud.setAlwaysOnTop(true, 'screen-saver');
   hud.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // A transparent always-on-screen window would otherwise swallow every click
+  // inside its bounds, including the empty margin the drop shadow needs. The
+  // renderer turns this back off while the pointer is actually over the pill,
+  // which is the only part there is anything to click.
+  hud.setIgnoreMouseEvents(true, { forward: true });
   hud.loadFile(path.join(__dirname, '..', 'renderer', 'hud.html'));
+
+  // A display being added, removed or rescaled can leave the pill outside
+  // every screen — indistinguishable, from the user's side, from the bug
+  // where it silently stopped appearing.
+  const reseat = () => {
+    if (!hud || hud.isDestroyed()) return;
+    const b = hud.getBounds();
+    const at2 = clampToDisplay(b.x, b.y, b.width, b.height);
+    if (at2.x !== b.x || at2.y !== b.y) {
+      hud.setBounds({ ...b, ...at2 });
+      store.updateSettings({ hudPosition: at2 });
+      log('hud: reseated onto a visible display');
+    }
+  };
+  screen.on('display-metrics-changed', reseat);
+  screen.on('display-removed', reseat);
+  screen.on('display-added', reseat);
 
   hud.webContents.on('did-finish-load', () => log('hud: loaded'));
   hud.webContents.on('did-fail-load', (_e, code, desc) => log('hud: FAILED TO LOAD', code, desc));
@@ -130,12 +214,38 @@ function createHud() {
 
 function showMainWindow(view) {
   if (!mainWindow) createMainWindow();
-  if (view) mainWindow.webContents.send('navigate', view);
+  if (view) {
+    // At launch this runs a few milliseconds after the window is created, long
+    // before the renderer exists to hear it. Sending anyway would silently
+    // drop the one navigation that matters — the first run opening on setup.
+    if (mainWindow.webContents.isLoading()) {
+      mainWindow.webContents.once('did-finish-load', () =>
+        mainWindow?.webContents.send('navigate', view));
+    } else {
+      mainWindow.webContents.send('navigate', view);
+    }
+  }
   mainWindow.show();
   mainWindow.focus();
 }
 
 // ---------------------------------------------------------------- state
+
+/**
+ * Show or hide the pill according to what the user asked for.
+ *
+ * With the indicator turned on it simply stays up — the renderer swaps
+ * between a compact idle form and the recording one. With it off, it is only
+ * on screen while there is something to report. Either way the window's
+ * visibility is decided in exactly one place: two code paths racing to show
+ * and hide it is what used to leave it in the wrong state.
+ */
+function applyHudVisibility() {
+  if (!hud || hud.isDestroyed()) return;
+  const wanted = store.settings().showIndicator !== false || state !== 'idle';
+  if (wanted && !hud.isVisible()) hud.showInactive();
+  else if (!wanted && hud.isVisible()) hud.hide();
+}
 
 function setState(next, detail = {}) {
   state = next;
@@ -146,14 +256,32 @@ function setState(next, detail = {}) {
   if (next === 'recording') {
     hud?.showInactive();
   } else if (next === 'idle') {
-    // Leave the result on screen briefly so the user sees it landed.
-    setTimeout(() => { if (state === 'idle') hud?.hide(); }, detail.linger ?? 1400);
+    // Handing the linger to the renderer rather than hiding the window on a
+    // timer here: the renderer owns how long a result stays readable, and it
+    // can cancel its own timer when a new recording starts. A timer on this
+    // side could not, which is how a stale one used to blank the pill in the
+    // middle of the next recording.
+    hud?.webContents.send('hud:linger', { ms: detail.linger ?? 1400 });
   }
 }
 
 async function startRecording() {
   log('startRecording: state =', state, 'hud =', hud ? 'present' : 'MISSING');
   if (state !== 'idle') return;
+
+  // The single gate. Every way of starting a recording — hotkey, tray, the
+  // Record button — arrives here, so refusing once covers all of them.
+  if (!ready) {
+    log('startRecording: refused — setup is not complete');
+    hotkeys?.reset();
+    setState('idle', {
+      error: 'Finish setup first — Yapanese has nothing to transcribe with yet.',
+      linger: 3600,
+    });
+    hud?.showInactive();
+    showMainWindow('setup');
+    return;
+  }
   const settings = store.settings();
   recordingStartedAt = Date.now();
 
@@ -213,29 +341,57 @@ async function setupHotkeys() {
 
 // ---------------------------------------------------------------- tray
 
+/** What the menu was last built for. The menu only depends on `ready`, and
+ *  replacing it while the user has it open closes it under their cursor —
+ *  which updateTray would otherwise do on every recording start and stop. */
+let trayMenuReady = null;
+
 function updateTray() {
   if (!tray) return;
   tray.setImage(makeTrayIcon(state));
   tray.setToolTip(
-    state === 'recording' ? 'Yapanese — recording'
+    !ready ? 'Yapanese — setup not finished'
+      : state === 'recording' ? 'Yapanese — recording'
       : state === 'transcribing' ? 'Yapanese — transcribing'
       : 'Yapanese'
   );
+  if (trayMenuReady !== ready) {
+    trayMenuReady = ready;
+    tray.setContextMenu(buildTrayMenu());
+  }
 }
 
-function buildTray() {
-  tray = new Tray(makeTrayIcon('idle'));
-  const menu = Menu.buildFromTemplate([
-    { label: 'Start / stop dictation', click: toggleRecording },
+function buildTrayMenu() {
+  const update = updateStatus.state === 'ready'
+    ? [{ label: `Restart to update to ${updateStatus.version}`, click: () => updater.install() },
+       { type: 'separator' }]
+    : updateStatus.state === 'available'
+      ? [{ label: `Update to ${updateStatus.version}…`, click: () => showMainWindow('history') },
+         { type: 'separator' }]
+      : [];
+
+  return Menu.buildFromTemplate([
+    ...update,
+    // Greyed out rather than hidden, so the reason it cannot be used is
+    // visible next to it instead of the option simply being absent.
+    {
+      label: ready ? 'Start / stop dictation' : 'Start / stop dictation (setup not finished)',
+      enabled: ready,
+      click: toggleRecording,
+    },
+    ...(ready ? [] : [{ label: 'Finish setup…', click: () => showMainWindow('setup') }]),
     { type: 'separator' },
     { label: 'History', click: () => showMainWindow('history') },
     { label: 'Settings', click: () => showMainWindow('settings') },
     { type: 'separator' },
     { label: 'Quit Yapanese', click: () => { app.isQuitting = true; app.quit(); } },
   ]);
-  tray.setContextMenu(menu);
-  tray.on('click', () => showMainWindow('history'));
-  updateTray();
+}
+
+function buildTray() {
+  tray = new Tray(makeTrayIcon('idle'));
+  tray.on('click', () => showMainWindow(ready ? 'history' : 'setup'));
+  updateTray();   // builds the menu for the current readiness
 }
 
 // ---------------------------------------------------------------- pipeline
@@ -293,6 +449,11 @@ ipcMain.on('capture:result', async (_e, { sampleRate, sampleCount, peak, rms }) 
     hotkeys?.reset();
     setState('idle', { error: result.error, linger: 4000 });
     mainWindow?.webContents.send('toast', { kind: 'error', message: result.error });
+
+    // The transcript is recoverable and the cause is fixable, so put the fix
+    // in front of the user instead of leaving an error they have to research.
+    // The audio is already saved as an unfinished entry above, waiting.
+    if (result.setupRequired) showMainWindow('setup');
     return;
   }
 
@@ -426,6 +587,14 @@ ipcMain.handle('settings:set', (_e, patch) => {
   if ('launchAtLogin' in patch) {
     app.setLoginItemSettings({ openAtLogin: !!patch.launchAtLogin, args: ['--hidden'] });
   }
+  if ('showIndicator' in patch) applyHudVisibility();
+  // Clearing the saved position has to move the window too, otherwise
+  // "Reset position" only forgets where the pill is rather than putting it
+  // back somewhere the user can find it.
+  if ('hudPosition' in patch && !patch.hudPosition && hud && !hud.isDestroyed()) {
+    const b = hud.getBounds();
+    hud.setBounds({ ...b, ...defaultHudPosition(b.width, b.height) });
+  }
   return next;
 });
 
@@ -464,6 +633,9 @@ ipcMain.handle('history:transcribe', async (_e, id) => {
 
   if (!result.ok) {
     // Left as unfinished on purpose: the audio is still the only copy.
+    // Same reasoning as a live recording that cannot be transcribed — if the
+    // reason is a missing component, show the screen that installs it.
+    if (result.setupRequired) showMainWindow('setup');
     return { ok: false, error: result.error };
   }
 
@@ -477,9 +649,15 @@ ipcMain.handle('state:get', () => state);
 
 ipcMain.handle('diagnostics', async () => {
   const settings = store.settings();
-  const yap = await locate('yap', settings.yapPath);
-  const ffmpeg = await locate('ffmpeg', settings.ffmpegPath);
+  const [whisperCli, yap, ffmpeg] = await Promise.all([
+    locate('whisper-cli', settings.whisperPath),
+    locate('yap', settings.yapPath),
+    locate('ffmpeg', settings.ffmpegPath),
+  ]);
   return {
+    // The one that actually matters. yap is only ever a fallback, so listing
+    // it first used to make a working install look broken.
+    whisperCli,
     yap,
     ffmpeg,
     dataDir: store.dataDir(),
@@ -490,6 +668,204 @@ ipcMain.handle('diagnostics', async () => {
 });
 
 ipcMain.handle('open:dataDir', () => shell.openPath(store.dataDir()));
+
+// -------------------------------------------------------------------- hud
+
+/**
+ * Resize the window around the pill the renderer just measured.
+ *
+ * The pill is anchored by its centre and its bottom edge, so a message
+ * arriving does not shunt it sideways or make it climb the screen — it grows
+ * outwards from where the user put it.
+ */
+ipcMain.on('hud:resize', (_e, { width, height }) => {
+  if (!hud || hud.isDestroyed()) return;
+  // A recording starting mid-drag would otherwise resize the window while the
+  // user is holding it, against a size the drag has already cached.
+  if (hudDrag) return;
+  const w = Math.round(Math.min(HUD_MAX_WIDTH, Math.max(HUD_MIN_WIDTH, width)));
+  const h = Math.round(Math.max(HUD_HEIGHT, height));
+  const b = hud.getBounds();
+  if (b.width === w && b.height === h) return;
+
+  const at = clampToDisplay(
+    Math.round(b.x + (b.width - w) / 2),
+    Math.round(b.y + b.height - h),
+    w, h
+  );
+  hud.setBounds({ ...at, width: w, height: h });
+});
+
+/**
+ * Drag the pill.
+ *
+ * The window follows the real cursor, sampled here, rather than being nudged
+ * by mousemove events from the renderer. That distinction is the whole fix:
+ * the window moves out from under the pointer as it goes, so once the drag
+ * outran the IPC round trip the cursor was outside the window, no more
+ * mousemove arrived, and the pill stalled until the pointer wandered back
+ * over it — which is what read as drifting and sticking.
+ *
+ * The renderer now only says when the drag starts and ends. Where the pointer
+ * is in between is something this side can just ask about.
+ */
+let hudDrag = null;
+
+// ~120 Hz. The cost is one cheap syscall per tick, and anything slower is
+// visible as the pill lagging behind the cursor.
+const HUD_DRAG_INTERVAL_MS = 8;
+
+/** Hold the pill inside the screen the pointer is on. Clamping against the
+ *  display nearest the *window* instead let the reference flip to another
+ *  monitor mid-drag and yank the pill across to it. */
+function clampToCursorDisplay(cursor, x, y, w, h) {
+  const area = (screen.getDisplayNearestPoint(cursor) || screen.getPrimaryDisplay()).workArea;
+  return {
+    x: Math.round(Math.min(Math.max(x, area.x), area.x + area.width - w)),
+    y: Math.round(Math.min(Math.max(y, area.y), area.y + area.height - h)),
+  };
+}
+
+function stopHudDrag() {
+  if (!hudDrag) return;
+  clearInterval(hudDrag.timer);
+  hudDrag = null;
+}
+
+// Nobody holds a 12 px pill for a minute. This is a dead-man's switch: the
+// drag is ended by the renderer, and if the renderer dies mid-drag the window
+// would otherwise follow the cursor around the screen forever.
+const HUD_DRAG_MAX_MS = 60_000;
+
+function tickHudDrag() {
+  if (!hudDrag || !hud || hud.isDestroyed()) return stopHudDrag();
+  if (Date.now() - hudDrag.startedAt > HUD_DRAG_MAX_MS) {
+    log('hud: drag abandoned after', HUD_DRAG_MAX_MS, 'ms');
+    const b = hud.getBounds();
+    stopHudDrag();
+    store.updateSettings({ hudPosition: { x: b.x, y: b.y } });
+    return;
+  }
+
+  const cursor = screen.getCursorScreenPoint();
+  const at = clampToCursorDisplay(
+    cursor,
+    cursor.x - hudDrag.dx,
+    cursor.y - hudDrag.dy,
+    // Cached at drag start. Re-reading getBounds every tick fed the window's
+    // own rounded-back position into the next move, and on a fractionally
+    // scaled display that rounding is where the jitter came from.
+    hudDrag.width,
+    hudDrag.height
+  );
+
+  if (at.x === hudDrag.last.x && at.y === hudDrag.last.y) return;
+  hudDrag.last = at;
+  // setPosition, not setBounds: nothing here should be able to resize the
+  // window, and a resize arriving mid-drag made it jump.
+  hud.setPosition(at.x, at.y);
+}
+
+ipcMain.on('hud:drag-start', () => {
+  if (!hud || hud.isDestroyed()) return;
+  stopHudDrag();
+  const cursor = screen.getCursorScreenPoint();
+  const b = hud.getBounds();
+  hudDrag = {
+    dx: cursor.x - b.x,
+    dy: cursor.y - b.y,
+    width: b.width,
+    height: b.height,
+    last: { x: b.x, y: b.y },
+    startedAt: Date.now(),
+    timer: setInterval(tickHudDrag, HUD_DRAG_INTERVAL_MS),
+  };
+});
+
+ipcMain.on('hud:drag-end', () => {
+  if (!hudDrag) return;
+  stopHudDrag();
+  if (!hud || hud.isDestroyed()) return;
+  const b = hud.getBounds();
+  store.updateSettings({ hudPosition: { x: b.x, y: b.y } });
+  log('hud: moved to', `${b.x},${b.y}`);
+});
+
+// Click-through everywhere except the pill itself, so an always-on-screen
+// indicator does not eat clicks meant for whatever is behind it.
+ipcMain.on('hud:interactive', (_e, on) => {
+  if (!hud || hud.isDestroyed()) return;
+  // Never while dragging. Making the window transparent to the mouse
+  // mid-drag hands the pointer to whatever is underneath and abandons the
+  // pill wherever it happened to be.
+  if (hudDrag && !on) return;
+  hud.setIgnoreMouseEvents(!on, { forward: true });
+});
+
+/** The renderer has finished showing a result and gone back to idle. */
+ipcMain.on('hud:settled', () => applyHudVisibility());
+
+// ----------------------------------------------------------------- updates
+
+/** Tracked so the tray can offer the update and the window can show it even
+ *  if it was closed when the news arrived. */
+let updateStatus = { state: 'idle' };
+
+function onUpdateStatus(next) {
+  const wasOffering = updateStatus.state === 'available' || updateStatus.state === 'ready';
+  updateStatus = next;
+  mainWindow?.webContents.send('update:status', next);
+  const offering = next.state === 'available' || next.state === 'ready';
+  // The tray menu only changes shape when there is or is not something to
+  // offer, so it is left alone through every download progress event.
+  if (offering !== wasOffering) {
+    trayMenuReady = null;
+    updateTray();
+  }
+}
+
+ipcMain.handle('update:get', () => updateStatus);
+ipcMain.handle('update:check', () => updater.check({ silent: false }));
+ipcMain.handle('update:download', () => updater.download());
+ipcMain.handle('update:install', () => updater.install());
+
+/** Clicking the pill opens the transcript it is telling you about. */
+ipcMain.on('hud:open', () => showMainWindow('history'));
+
+// ------------------------------------------------------------------ setup
+
+/** The install in flight, so the Cancel button has something to pull. */
+let installing = null;
+
+// Goes through refreshReadiness so that prerequisites installed by hand,
+// while the app was already running, lift the gate on the next look.
+ipcMain.handle('setup:inspect', () => refreshReadiness());
+
+ipcMain.handle('setup:install', async (_e, choice) => {
+  if (installing) return { ok: false, error: 'An install is already running.' };
+
+  const controller = new AbortController();
+  installing = controller;
+  try {
+    const res = await setup.install(choice, {
+      signal: controller.signal,
+      onLog: (line) => log(line),
+      onProgress: (p) => mainWindow?.webContents.send('setup:progress', p),
+    });
+    // The renderer re-reads the truth from disk rather than trusting the
+    // result it was just handed: a partial install has to show as partial.
+    // This is also what lifts the recording gate, so a finished setup works
+    // immediately instead of needing a restart.
+    return { ...res, state: await refreshReadiness() };
+  } finally {
+    installing = null;
+  }
+});
+
+ipcMain.handle('setup:cancel', () => {
+  installing?.abort();
+  return { ok: true };
+});
 
 // ---------------------------------------------------------------- lifecycle
 
@@ -535,14 +911,34 @@ if (!app.requestSingleInstanceLock()) {
     createHud();
     buildTray();
 
-    require('./whisper').ensureVadModel().then((r) => {
-      log('vad model:', r.ok ? (r.cached ? 'cached' : 'downloaded') : `unavailable (${r.error})`);
+    // The pill is meant to be there before the first shortcut is pressed —
+    // its job is to tell you the app is alive and listening, which it cannot
+    // do if it only appears once you have already started talking.
+    hud.webContents.once('did-finish-load', () => {
+      applyHudVisibility();
+      // Readiness is settled below, possibly before this window exists to
+      // hear about it, so it is repeated once there is somebody listening.
+      hud.webContents.send('readiness', { ready });
     });
+
+    // Nothing here can transcribe without whisper.cpp and a model, and the
+    // installer deliberately does not carry either. Finding that out on the
+    // first attempt to dictate — after the user has already spoken — is the
+    // worst possible moment, so it is settled at launch instead.
+    const state0 = await refreshReadiness();
+    log('setup:', state0.ready ? 'ready' : 'incomplete',
+        '| engine =', state0.engine.kind || 'missing',
+        '| models =', state0.models.filter((m) => m.installed).map((m) => m.id).join(',') || 'none');
 
     // Launched by Windows at login, or by the user from the Start menu.
     // Shown before the hook is awaited: starting the hook process is quick,
     // but the window must not be held hostage to it if it ever is not.
-    if (!process.argv.includes('--hidden')) showMainWindow('history');
+    //
+    // A machine that cannot transcribe yet opens on setup whatever it was
+    // asked for — including at login, because starting hidden and silently
+    // broken is how a user ends up thinking the app does not work.
+    if (!state0.ready) showMainWindow('setup');
+    else if (!process.argv.includes('--hidden')) showMainWindow('history');
 
     const res = await setupHotkeys();
     if (!res.ok) {
@@ -559,10 +955,14 @@ if (!app.requestSingleInstanceLock()) {
     // Last, so a leftover recording never delays the app becoming usable.
     try { announceRecovered(importOrphans()); }
     catch (err) { log('recovery: failed —', err.message); }
+
+    updater.start({ onStatus: onUpdateStatus, log });
   });
 
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
+    stopHudDrag();
+    updater.stop();
     hotkeys?.stop();
     // Quitting mid-recording keeps the audio and closes the file properly, so
     // it comes back as a clean recovery rather than a repaired one.
