@@ -30,12 +30,51 @@ let recordingsDir = null;
 let state = 'idle';
 let recordingStartedAt = 0;
 
-// The pill is drawn by the renderer and the window is wrapped around it.
-// These are the starting bounds and the floor a resize request is held to —
-// the renderer measures the real width, which changes with the message.
-const HUD_HEIGHT = 46;
-const HUD_MIN_WIDTH = 108;
-const HUD_MAX_WIDTH = 480;
+/**
+ * The pill is one fixed size, in every state, forever.
+ *
+ * It used to be measured by the renderer, with the window resized to wrap
+ * whatever was drawn. That is what made it grow. On a fractionally scaled
+ * display — 150% here — Electron reports a window's bounds as the *enclosing*
+ * DIP rectangle, so a size read back is a pixel larger than the size that was
+ * set, and setting that value again rounds up once more. `setPosition` goes
+ * through the same read-modify-write, so it inflates the window on every call:
+ * measured, a two-second drag at 125 Hz took the window from 170x44 to
+ * 469x343. The pill is centred in that window, so it slid away from the cursor
+ * as the window ballooned around it, and the resize that ran when the drag
+ * ended re-centred against the inflated width and flung the pill into a corner
+ * — which is what read as the indicator vanishing.
+ *
+ * A constant size removes the read-modify-write entirely: nothing ever asks
+ * the window how big it is, so nothing can round it up.
+ */
+// 164x42 wraps a 144x26 pill plus the margin its shadow needs. The recording
+// form used to be about 208px against an idle form of 108, which is the jump
+// that made dictating feel like something barged onto the screen.
+const HUD_WIDTH = 164;
+const HUD_HEIGHT = 42;
+
+/** Every reposition goes through here. Passing the size explicitly on each
+ *  move is the fix — `setPosition` is the call that inflates. */
+function hudBoundsAt(x, y) {
+  return { x, y, width: HUD_WIDTH, height: HUD_HEIGHT };
+}
+
+/**
+ * Has the window actually grown, or is this just the rounding?
+ *
+ * `getBounds` reports the enclosing DIP rectangle, so at 150% it comes back a
+ * couple of pixels larger than the size that was set — 164x42 reads as 166x44
+ * — every time, and setting it again does not change that. Comparing for
+ * equality would therefore find the window "inflated" forever. The rounding is
+ * bounded by the scale factor; real inflation ran to +300px, so anything past
+ * a few pixels is unambiguous.
+ */
+const HUD_SIZE_SLACK = 6;
+
+function hudIsInflated(b) {
+  return b.width > HUD_WIDTH + HUD_SIZE_SLACK || b.height > HUD_HEIGHT + HUD_SIZE_SLACK;
+}
 
 /**
  * Whether whisper.cpp and the models are actually present.
@@ -138,13 +177,13 @@ function defaultHudPosition(w, h) {
 }
 
 function createHud() {
-  // Sized to the compact idle pill. The renderer measures its own content and
-  // asks for a resize whenever that changes, so the window stays wrapped
-  // around what is drawn rather than being a fixed rectangle that clips a
-  // long message and swallows clicks around a short one.
-  const w = HUD_MIN_WIDTH;
+  const w = HUD_WIDTH;
   const h = HUD_HEIGHT;
 
+  // A position saved by an older build was written while the window was
+  // inflated, so it can be most of a screen away from where the pill actually
+  // looked to be. The clamp keeps it on a display; being a little off is
+  // recoverable by dragging, being off-screen is not.
   const saved = store.settings().hudPosition;
   const at = saved
     ? clampToDisplay(saved.x, saved.y, w, h)
@@ -186,9 +225,11 @@ function createHud() {
   const reseat = () => {
     if (!hud || hud.isDestroyed()) return;
     const b = hud.getBounds();
-    const at2 = clampToDisplay(b.x, b.y, b.width, b.height);
-    if (at2.x !== b.x || at2.y !== b.y) {
-      hud.setBounds({ ...b, ...at2 });
+    const at2 = clampToDisplay(b.x, b.y, HUD_WIDTH, HUD_HEIGHT);
+    // The size is restated as well as the position: this is also the repair
+    // path for a window an older build had already inflated.
+    if (at2.x !== b.x || at2.y !== b.y || hudIsInflated(b)) {
+      hud.setBounds(hudBoundsAt(at2.x, at2.y));
       store.updateSettings({ hudPosition: at2 });
       log('hud: reseated onto a visible display');
     }
@@ -243,6 +284,19 @@ function showMainWindow(view) {
 function applyHudVisibility() {
   if (!hud || hud.isDestroyed()) return;
   const wanted = store.settings().showIndicator !== false || state !== 'idle';
+  // Showing is the moment to make sure the window is still the size it is
+  // supposed to be. Nothing in this build resizes it, but a profile carried
+  // over from one that did would otherwise keep an inflated window — and an
+  // inflated window is a pill sitting well away from where it appears to be,
+  // swallowing clicks across a wide invisible rectangle.
+  if (wanted) {
+    const b = hud.getBounds();
+    if (hudIsInflated(b)) {
+      const at = clampToDisplay(b.x, b.y, HUD_WIDTH, HUD_HEIGHT);
+      hud.setBounds(hudBoundsAt(at.x, at.y));
+      log('hud: corrected an inflated window from', `${b.width}x${b.height}`);
+    }
+  }
   if (wanted && !hud.isVisible()) hud.showInactive();
   else if (!wanted && hud.isVisible()) hud.hide();
 }
@@ -254,7 +308,9 @@ function setState(next, detail = {}) {
   updateTray();
 
   if (next === 'recording') {
-    hud?.showInactive();
+    // Via applyHudVisibility rather than showInactive directly, so the size
+    // check runs on the one path that must never show a broken pill.
+    applyHudVisibility();
   } else if (next === 'idle') {
     // Handing the linger to the renderer rather than hiding the window on a
     // timer here: the renderer owns how long a result stays readable, and it
@@ -274,11 +330,10 @@ async function startRecording() {
   if (!ready) {
     log('startRecording: refused — setup is not complete');
     hotkeys?.reset();
-    setState('idle', {
-      error: 'Finish setup first — Yapanese has nothing to transcribe with yet.',
-      linger: 3600,
-    });
-    hud?.showInactive();
+    // Short enough to read on the pill. The setup window opens right behind
+    // it, which is where the explanation belongs.
+    setState('idle', { error: 'Finish setup first', linger: 3600 });
+    applyHudVisibility();
     showMainWindow('setup');
     return;
   }
@@ -592,8 +647,8 @@ ipcMain.handle('settings:set', (_e, patch) => {
   // "Reset position" only forgets where the pill is rather than putting it
   // back somewhere the user can find it.
   if ('hudPosition' in patch && !patch.hudPosition && hud && !hud.isDestroyed()) {
-    const b = hud.getBounds();
-    hud.setBounds({ ...b, ...defaultHudPosition(b.width, b.height) });
+    const home = defaultHudPosition(HUD_WIDTH, HUD_HEIGHT);
+    hud.setBounds(hudBoundsAt(home.x, home.y));
   }
   return next;
 });
@@ -672,42 +727,18 @@ ipcMain.handle('open:dataDir', () => shell.openPath(store.dataDir()));
 // -------------------------------------------------------------------- hud
 
 /**
- * Resize the window around the pill the renderer just measured.
- *
- * The pill is anchored by its centre and its bottom edge, so a message
- * arriving does not shunt it sideways or make it climb the screen — it grows
- * outwards from where the user put it.
- */
-ipcMain.on('hud:resize', (_e, { width, height }) => {
-  if (!hud || hud.isDestroyed()) return;
-  // A recording starting mid-drag would otherwise resize the window while the
-  // user is holding it, against a size the drag has already cached.
-  if (hudDrag) return;
-  const w = Math.round(Math.min(HUD_MAX_WIDTH, Math.max(HUD_MIN_WIDTH, width)));
-  const h = Math.round(Math.max(HUD_HEIGHT, height));
-  const b = hud.getBounds();
-  if (b.width === w && b.height === h) return;
-
-  const at = clampToDisplay(
-    Math.round(b.x + (b.width - w) / 2),
-    Math.round(b.y + b.height - h),
-    w, h
-  );
-  hud.setBounds({ ...at, width: w, height: h });
-});
-
-/**
  * Drag the pill.
  *
  * The window follows the real cursor, sampled here, rather than being nudged
- * by mousemove events from the renderer. That distinction is the whole fix:
- * the window moves out from under the pointer as it goes, so once the drag
- * outran the IPC round trip the cursor was outside the window, no more
- * mousemove arrived, and the pill stalled until the pointer wandered back
- * over it — which is what read as drifting and sticking.
+ * by mousemove events from the renderer. The window moves out from under the
+ * pointer as it goes, so once a drag outran the IPC round trip the cursor was
+ * outside the window and no more mousemove arrived.
  *
- * The renderer now only says when the drag starts and ends. Where the pointer
- * is in between is something this side can just ask about.
+ * The renderer only says when the drag starts and stops. Measured over a
+ * synthetic 2.4-second drag, the offset between cursor and window origin held
+ * at exactly its starting value for all 300 samples — the arithmetic here was
+ * never the problem. What moved the pill was the window growing around it, so
+ * the one thing that matters below is that every move restates the size.
  */
 let hudDrag = null;
 
@@ -732,7 +763,7 @@ function stopHudDrag() {
   hudDrag = null;
 }
 
-// Nobody holds a 12 px pill for a minute. This is a dead-man's switch: the
+// Nobody drags the pill for a solid minute. This is a dead-man's switch: the
 // drag is ended by the renderer, and if the renderer dies mid-drag the window
 // would otherwise follow the cursor around the screen forever.
 const HUD_DRAG_MAX_MS = 60_000;
@@ -752,30 +783,28 @@ function tickHudDrag() {
     cursor,
     cursor.x - hudDrag.dx,
     cursor.y - hudDrag.dy,
-    // Cached at drag start. Re-reading getBounds every tick fed the window's
-    // own rounded-back position into the next move, and on a fractionally
-    // scaled display that rounding is where the jitter came from.
-    hudDrag.width,
-    hudDrag.height
+    HUD_WIDTH,
+    HUD_HEIGHT
   );
 
   if (at.x === hudDrag.last.x && at.y === hudDrag.last.y) return;
   hudDrag.last = at;
-  // setPosition, not setBounds: nothing here should be able to resize the
-  // window, and a resize arriving mid-drag made it jump.
-  hud.setPosition(at.x, at.y);
+  // setBounds with the size stated, never setPosition. setPosition reads the
+  // current bounds back and re-applies them, and on a 150% display that read
+  // returns a rectangle one pixel larger than the one that was set — so it
+  // grew the window a pixel per call, 125 times a second, while dragging.
+  hud.setBounds(hudBoundsAt(at.x, at.y));
 }
 
 ipcMain.on('hud:drag-start', () => {
   if (!hud || hud.isDestroyed()) return;
+  if (process.env.YAPANESE_HUD_TRACE) log('hud: drag-start');
   stopHudDrag();
   const cursor = screen.getCursorScreenPoint();
   const b = hud.getBounds();
   hudDrag = {
     dx: cursor.x - b.x,
     dy: cursor.y - b.y,
-    width: b.width,
-    height: b.height,
     last: { x: b.x, y: b.y },
     startedAt: Date.now(),
     timer: setInterval(tickHudDrag, HUD_DRAG_INTERVAL_MS),
@@ -788,13 +817,16 @@ ipcMain.on('hud:drag-end', () => {
   if (!hud || hud.isDestroyed()) return;
   const b = hud.getBounds();
   store.updateSettings({ hudPosition: { x: b.x, y: b.y } });
-  log('hud: moved to', `${b.x},${b.y}`);
+  // The size is logged as well as the position. It should never change, and
+  // the one time it did, it did so silently for months.
+  log('hud: moved to', `${b.x},${b.y}`, `size ${b.width}x${b.height}`);
 });
 
 // Click-through everywhere except the pill itself, so an always-on-screen
 // indicator does not eat clicks meant for whatever is behind it.
 ipcMain.on('hud:interactive', (_e, on) => {
   if (!hud || hud.isDestroyed()) return;
+  if (process.env.YAPANESE_HUD_TRACE) log('hud: interactive =', on);
   // Never while dragging. Making the window transparent to the mouse
   // mid-drag hands the pointer to whatever is underneath and abandons the
   // pill wherever it happened to be.

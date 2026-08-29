@@ -7,12 +7,17 @@ const meter = document.getElementById('meter');
 const timeEl = document.getElementById('time');
 const msgEl = document.getElementById('msg');
 
-const BAR_COUNT = 22;
+// 17 bars at 2px with 2px between them is 66px, which is what the meter slot
+// comes to inside a 144px pill once the lamp and the clock have taken theirs.
+// The pill never resizes, so this is a fixed budget rather than a preference.
+const BAR_COUNT = 17;
+const BAR_MIN_PX = 2;
+const BAR_MAX_PX = 14;
 const SAMPLE_RATE = 16000;
 
 const bars = Array.from({ length: BAR_COUNT }, (_, i) => {
   const b = document.createElement('i');
-  b.style.height = '3px';
+  b.style.height = `${BAR_MIN_PX}px`;
   // Position along the meter, so the transcribing animation can stagger
   // across the bars from CSS rather than being driven from here.
   b.style.setProperty('--i', String(i));
@@ -51,9 +56,6 @@ let loudestPeak = 0;
 // labels non-speech explicitly and an amplitude threshold cannot.
 const SILENCE_RMS_THRESHOLD = 0.002;
 
-const wrap = document.getElementById('wrap');
-const snippetEl = document.getElementById('snippet');
-
 /**
  * The one pending timer.
  *
@@ -75,45 +77,60 @@ function cancelPending() {
   pendingTimer = null;
 }
 
-/** Ask the main process to wrap the window around whatever is now drawn. */
-function fit() {
-  requestAnimationFrame(() => {
-    const r = wrap.getBoundingClientRect();
-    api.hudResize(Math.ceil(r.width), Math.ceil(r.height));
-  });
-}
+/**
+ * There is no resize. The pill is 144x26 in every state and the window around
+ * it is a fixed 164x42; states differ only in what occupies the middle slot.
+ * The window used to be resized to fit whatever was drawn, which is what
+ * inflated it a pixel per move on a fractionally scaled display.
+ *
+ * A message and the meter share that slot, so showing one hides the other and
+ * the width cannot change. Anything longer than about twenty characters is
+ * ellipsised — the full text always reaches the main window as well.
+ */
+const MSG_MAX = 22;
 
-function setState(state, message, snippet) {
+function setState(state, message) {
   pill.dataset.state = state;
   msgEl.hidden = !message;
-  if (message) msgEl.textContent = message;
-  snippetEl.hidden = !snippet;
-  if (snippet) snippetEl.textContent = snippet;
-  timeEl.hidden = state === 'error' || state === 'done' || state === 'idle';
-  fit();
+  if (message) {
+    msgEl.textContent = message.length > MSG_MAX ? `${message.slice(0, MSG_MAX - 1)}…` : message;
+    msgEl.title = message;
+  }
 }
 
 function show() {
   cancelPending();
+  // The `in` class is what takes the pill from opacity 0 to visible, so it must
+  // land unconditionally. requestAnimationFrame gives the entrance transition
+  // a frame to start from, but frames are throttled while the window is hidden
+  // — and the window is hidden exactly when the indicator is turned off, which
+  // is the case where the pill is about to be shown for a result. A class that
+  // never arrives is an invisible pill, which looks identical to the app having
+  // died. The timeout is the guarantee; adding it twice costs nothing.
   requestAnimationFrame(() => pill.classList.add('in'));
+  setTimeout(() => pill.classList.add('in'), 150);
 }
 
-/**
- * Back to the resting state.
- *
- * When the indicator is left on screen this is a shape change rather than a
- * disappearance; the main process decides which, and only hides the window
- * if the user turned the indicator off.
- */
+/** Whether the app can actually transcribe. Only the lamp's colour depends on
+ *  it now; the words that used to sit beside it are gone. */
 let ready = true;
 
-function idleLabel() {
-  return ready ? 'Ready' : 'Setup needed';
-}
-
+/**
+ * Back to the resting state, which carries no words at all.
+ *
+ * It used to read "Ready" — a label the user reads once and then has to keep
+ * looking at all day. The dot and the flat row of bars say the same thing
+ * without asking for attention, and an amber dot says setup is unfinished; the
+ * setup window itself does the explaining.
+ *
+ * Whether the window then goes away is not decided here. The main process
+ * hides it only if the user turned the indicator off, so for everyone else
+ * this is a change of state rather than a disappearance.
+ */
 function settle() {
   cancelPending();
-  setState('idle', idleLabel());
+  clearTimeout(lockHintTimer);
+  setState('idle');
   api.hudSettled();
 }
 
@@ -122,7 +139,7 @@ function renderLevel(peak) {
   if (levels.length > BAR_COUNT) levels.shift();
   for (let i = 0; i < BAR_COUNT; i++) {
     const v = levels[i] ?? 0;
-    bars[i].style.height = `${3 + v * 19}px`;
+    bars[i].style.height = `${BAR_MIN_PX + v * (BAR_MAX_PX - BAR_MIN_PX)}px`;
     bars[i].style.opacity = String(0.35 + v * 0.65);
   }
 }
@@ -154,7 +171,7 @@ function flush() {
 
 function resetMeter() {
   levels = new Array(BAR_COUNT).fill(0);
-  bars.forEach((b) => { b.style.height = '3px'; b.style.opacity = '0.35'; });
+  bars.forEach((b) => { b.style.height = `${BAR_MIN_PX}px`; b.style.opacity = '0.35'; });
 }
 
 // Memory is no longer what limits a long recording — the audio goes to disk
@@ -162,6 +179,30 @@ function resetMeter() {
 // finding that out after an hour of talking is too late to be useful.
 const LONG_RECORDING_MS = 30 * 60 * 1000;
 let longNoteShown = false;
+
+/**
+ * A note shown over the meter for a moment, then taken away again.
+ *
+ * The meter and any message share one slot so the pill cannot change width, so
+ * anything said while recording is necessarily said *instead of* the levels.
+ * That is fine for a couple of seconds and wrong as a permanent state — the
+ * moving bars are the evidence that the app is still listening.
+ *
+ * Its own timer, separate from the settle timer, so a hint expiring can never
+ * cut a recording's display short.
+ */
+let lockHintTimer = null;
+
+function hint(text, ms) {
+  clearTimeout(lockHintTimer);
+  msgEl.hidden = false;
+  msgEl.textContent = text;
+  msgEl.title = text;
+  lockHintTimer = setTimeout(() => {
+    // Only clear it if the pill is still doing the thing the hint was about.
+    if (pill.dataset.state === 'recording') msgEl.hidden = true;
+  }, ms);
+}
 
 function tick() {
   const ms = Date.now() - startedAt;
@@ -174,7 +215,7 @@ function tick() {
 
   if (!longNoteShown && ms >= LONG_RECORDING_MS && pill.dataset.locked === 'true') {
     longNoteShown = true;
-    msgEl.textContent = 'Long recording — transcribing will take a while';
+    hint('Long recording', 5000);
   }
 }
 
@@ -214,6 +255,7 @@ async function start({ deviceLabel, skipSilence }) {
     longNoteShown = false;
     currentDeviceLabel = deviceLabel || '';
     pill.dataset.locked = 'false';
+    clearTimeout(lockHintTimer);
     msgEl.hidden = true;
     resetMeter();
     startedAt = Date.now();
@@ -258,7 +300,9 @@ async function start({ deviceLabel, skipSilence }) {
     mute.connect(audioContext.destination);
   } catch (err) {
     teardown();
-    setState('error', 'Microphone unavailable');
+    // Short enough to read at this width. The sentence explaining what to do
+    // about it goes to the main window, which has room for it.
+    setState('error', 'No microphone');
     show();
     api.sendError(
       err && err.name === 'NotAllowedError'
@@ -282,6 +326,7 @@ function teardown() {
 
 function stop() {
   cancelPending();
+  clearTimeout(lockHintTimer);
   const rate = audioContext?.sampleRate || SAMPLE_RATE;
 
   // Hand over whatever has not been flushed yet before the graph goes away,
@@ -294,7 +339,10 @@ function stop() {
   // the red "still recording" ring sits on top of it and nothing appears to
   // have changed when the user taps to stop.
   pill.dataset.locked = 'false';
-  setState('transcribing', 'Transcribing…');
+  // No caption. The bars turn amber and run as a travelling wave, which says
+  // "working" without taking the slot the meter occupies — and the word would
+  // have had to displace the animation to fit.
+  setState('transcribing');
   resetMeter();
 
   if (count === 0) {
@@ -378,13 +426,12 @@ function endDrag(pointerId) {
   if (!dragging) return;
   dragging = false;
   pill.classList.remove('dragging');
-  if (pointerId != null && pill.hasPointerCapture(pointerId)) {
-    pill.releasePointerCapture(pointerId);
-  }
+  try {
+    if (pointerId != null && pill.hasPointerCapture(pointerId)) {
+      pill.releasePointerCapture(pointerId);
+    }
+  } catch {}
   api.hudDragEnd();
-  // Resizes are refused while a drag is in flight, so anything that changed
-  // the pill's size in the meantime is applied now.
-  fit();
   // A press that did not move the pill is a click, not a drag: it opens the
   // transcript the pill is reporting on.
   if (!movedWhileDown) api.hudOpen();
@@ -392,12 +439,21 @@ function endDrag(pointerId) {
 
 pill.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
+  // A press arriving while one is already in flight — a second button, a
+  // stylus alongside the mouse — would otherwise start a second drag against
+  // the first one's grab offset and tear the pill between them.
+  if (dragging) return;
   dragging = true;
   movedWhileDown = false;
   pressedAt = { x: e.screenX, y: e.screenY };
-  pill.setPointerCapture(e.pointerId);
   pill.classList.add('dragging');
+  // Told before the capture is taken, not after. setPointerCapture throws if
+  // the pointer is no longer active, and doing it the other way round meant
+  // the throw happened with `dragging` already true and the main process never
+  // told to start — leaving a drag that could not be moved, could not be
+  // ended, and swallowed every later press.
   api.hudDragStart();
+  try { pill.setPointerCapture(e.pointerId); } catch {}
   e.preventDefault();
 });
 
@@ -420,14 +476,13 @@ api.on('capture:start', start);
 api.on('capture:stop', stop);
 
 // Locked recording looks different from hold-to-talk: the user needs to know
-// it will keep running until they tap again.
+// it will keep running until they tap again. The steady ring on the lamp is
+// the lasting signal; the words are only needed at the moment it locks, so
+// they borrow the meter's slot briefly and then give it back.
 api.on('lock', (locked) => {
   pill.dataset.locked = String(locked);
-  msgEl.hidden = !locked;
-  // Says "recording" rather than "locked": the thing the user needs
-  // confirming is that it is still listening, not what mode it is in.
-  if (locked) msgEl.textContent = 'Recording — tap to stop';
-  fit();
+  if (locked) hint('Tap to stop', 1800);
+  else { clearTimeout(lockHintTimer); msgEl.hidden = true; }
 });
 
 /** How long a finished result stays up before the pill goes back to idle.
@@ -443,10 +498,9 @@ api.on('state', ({ state, error, delivered, text }) => {
   if (state !== 'idle') return;
 
   if (error) {
-    // The pill grows to fit its message now, but a whole paragraph of error
-    // would still run off the screen. The full text reaches the main window
-    // as a toast either way.
-    setState('error', error.length > 70 ? `${error.slice(0, 68)}…` : error);
+    // setState ellipsises anything too long for the pill. The full text
+    // reaches the main window as a toast either way.
+    setState('error', error);
     show();
     later(settle, 4200);
     return;
@@ -457,15 +511,10 @@ api.on('state', ({ state, error, delivered, text }) => {
   const pasted = delivered === 'pasted';
   const verb = pasted ? 'Pasted' : 'Copied';
 
-  // Show the words themselves when they were only copied. "Copied · 34 words"
-  // confirms that something was transcribed; the transcript confirms it heard
-  // the right thing — which is the actual question when nothing appeared in
-  // the app you were typing into.
-  const preview = !pasted && trimmed
-    ? (trimmed.length > 60 ? `${trimmed.slice(0, 58)}…` : trimmed)
-    : '';
-
-  setState('done', words ? `${verb} · ${words} word${words === 1 ? '' : 's'}` : verb, preview);
+  // "Copied · 34 words" is the answer to the question actually being asked —
+  // did it hear me — and it fits. The transcript itself does not, at this
+  // width; clicking the pill opens it.
+  setState('done', words ? `${verb} · ${words} word${words === 1 ? '' : 's'}` : verb);
   show();
   lastLinger = pasted ? LINGER_PASTED : LINGER_COPIED;
   later(settle, lastLinger);
@@ -479,16 +528,15 @@ api.on('hud:linger', ({ ms }) => {
   later(settle, Math.max(ms, lastLinger));
 });
 
-// Resting state from the moment the window loads, rather than the app being
-// invisible until the first time the shortcut is pressed.
+// Unfinished setup turns the lamp amber and stops the pill fading back, which
+// is all the pill needs to say — the setup window carries the detail.
 api.on('readiness', (info) => {
   ready = !!info.ready;
   pill.dataset.ready = String(ready);
-  if (pill.dataset.state === 'idle') setState('idle', idleLabel());
 });
 
-setState('idle', idleLabel());
+// Resting state from the moment the window loads, rather than the app being
+// invisible until the first time the shortcut is pressed.
+pill.dataset.ready = String(ready);
+setState('idle');
 show();
-// Inter arrives after first paint, and the width measured with the fallback
-// font is not the width the pill ends up being.
-document.fonts?.ready.then(fit);

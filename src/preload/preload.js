@@ -34,8 +34,9 @@ contextBridge.exposeInMainWorld('yapanese', {
   diagnostics: () => ipcRenderer.invoke('diagnostics'),
   openDataDir: () => ipcRenderer.invoke('open:dataDir'),
 
-  // hud chrome (HUD window only)
-  hudResize: (width, height) => ipcRenderer.send('hud:resize', { width, height }),
+  // hud chrome (HUD window only). No resize channel: the pill is a fixed size
+  // in every state, and the window being resized to fit its contents is what
+  // used to inflate it a pixel at a time on a fractionally scaled display.
   hudDragStart: () => ipcRenderer.send('hud:drag-start'),
   hudDragEnd: () => ipcRenderer.send('hud:drag-end'),
   hudInteractive: (on) => ipcRenderer.send('hud:interactive', on),
