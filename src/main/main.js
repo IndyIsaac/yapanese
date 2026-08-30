@@ -300,7 +300,15 @@ function createHud() {
   screen.on('display-removed', reseat);
   screen.on('display-added', reseat);
 
-  hud.webContents.on('did-finish-load', () => log('hud: loaded'));
+  hud.webContents.on('did-finish-load', () => {
+    log('hud: loaded');
+    // A fresh renderer always starts in the resting form, so the window is put
+    // back into it here rather than waiting to be told. Without this, a
+    // renderer that reloaded after a crash while the pill was open would come
+    // back as a badge sitting in a window still sized for the full pill — and
+    // it would never say so, because from its side nothing had changed.
+    hudPlace('rest');
+  });
   hud.webContents.on('did-fail-load', (_e, code, desc) => log('hud: FAILED TO LOAD', code, desc));
   // Electron 37 moved these fields onto the event object and deprecated the
   // positional arguments, which still arrive in 43. Prefer the object so this
