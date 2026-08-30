@@ -17,18 +17,30 @@
     cursor: default;
   }
 
-  /* The window is wrapped around this by the main process, which measures
-     what is drawn here. Room is left for the shadow, which would otherwise
-     be clipped by the window edge. */
-  #wrap { padding: 8px 10px; display: inline-flex; }
+  /* The window is a fixed 164x42 and this fills it, so the pill lands in the
+     middle with room around it for the shadow. Nothing here is measured and
+     nothing asks the window to resize: the pill is the same shape whatever it
+     is doing, which is the point — starting a recording should bring the
+     indicator to life, not replace it with something twice the size. */
+  #wrap { width: 100%; height: 100%; display: grid; place-items: center; }
 
+  /* Resting width. `wide` is the recording form; the difference between the
+     two is a straight width transition, and because the window is centred on
+     the same point in both, the pill blooms outwards from the badge rather
+     than unrolling to one side.
+
+     overflow: hidden is what makes the bloom look deliberate — the contents
+     are already laid out at full width and get revealed as the pill opens,
+     instead of appearing all at once at the end. */
   .pill {
+    width: 48px;
+    height: 26px;
+    overflow: hidden;
     display: flex;
     align-items: center;
-    gap: 9px;
-    padding: 6px 12px;
+    gap: 7px;
+    padding: 0 10px;
     border-radius: 999px;
-    box-sizing: border-box;
     background: rgba(19, 19, 21, 0.92);
     border: 1px solid rgba(255, 255, 255, 0.09);
     backdrop-filter: blur(18px) saturate(1.3);
@@ -37,38 +49,81 @@
     cursor: grab;
     transform: translateY(6px) scale(0.98);
     opacity: 0;
-    transition: transform 220ms cubic-bezier(.22,1,.36,1), opacity 170ms ease-out;
+    transition: width 180ms cubic-bezier(.22,1,.36,1),
+                transform 220ms cubic-bezier(.22,1,.36,1), opacity 170ms ease-out;
   }
+  .pill.wide { width: 144px; }
   .pill.in { transform: none; opacity: 1; }
+  /* No width transition while being dragged — a resize arriving mid-drag would
+     animate the pill out from under the cursor. */
   .pill.dragging { cursor: grabbing; transition: none; }
 
-  /* Idle is a marker, not a status bar: small enough to leave on screen all
-     day, and it says the app is listening for the shortcut. */
-  .pill[data-state='idle'] { padding: 5px 10px; opacity: 0.45; }
-  .pill[data-state='idle'].in { opacity: 0.45; }
-  .pill[data-state='idle']:hover.in { opacity: 1; }
-  .pill[data-state='idle'] .meter,
-  .pill[data-state='idle'] .time { display: none; }
+  /* The badge shows a microphone; the full pill shows the meter and the clock.
+     Both are in the markup at all times so the bloom reveals a finished layout
+     rather than building one as it opens. */
+  .mic { display: flex; align-items: center; color: #8b8b95; flex: 0 0 auto; }
+  .pill.wide .mic,
+  .pill:not(.wide) .body,
+  .pill:not(.wide) .time { display: none; }
 
-  /* Unfinished setup is not a resting state — the app cannot do its job —
-     so it does not get to fade into the background like an idle one. */
-  .pill[data-ready='false'][data-state='idle'],
-  .pill[data-ready='false'][data-state='idle'].in { opacity: 1; }
-  .pill[data-ready='false'][data-state='idle'] .lamp { background: #f2b544; }
-  .pill[data-ready='false'][data-state='idle'] .msg { color: #f2b544; }
+  /* Resting, it is a marker rather than a status bar — quiet enough to leave
+     on screen all day, and it says nothing, because a word that reads "Ready"
+     all day is just noise. A light and a microphone are the whole message.
 
-  /* state lamp */
-  .lamp { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: #82828c; }
+     The chrome recedes, not the pill. Fading the whole element with `opacity`
+     takes the green dot down with it, and a status light you have to squint at
+     is not doing its job — a child cannot be more opaque than its parent. So
+     the background, the border and the shadow are dialled back individually
+     and the dot is left alone. */
+  .pill[data-state='idle'] {
+    background: rgba(19, 19, 21, 0.52);
+    border-color: rgba(255, 255, 255, 0.05);
+    box-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.55);
+    transition: width 180ms cubic-bezier(.22,1,.36,1),
+                transform 220ms cubic-bezier(.22,1,.36,1), opacity 170ms ease-out,
+                background 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+  }
+  .pill[data-state='idle'] .mic { color: #6f7079; transition: color 200ms ease; }
+  .pill[data-state='idle']:hover .mic { color: #a6a6b0; }
+  .pill[data-state='idle']:hover.in,
+  .pill[data-ready='false'][data-state='idle'] {
+    background: rgba(19, 19, 21, 0.92);
+    border-color: rgba(255, 255, 255, 0.09);
+    box-shadow: 0 10px 26px -8px rgba(0, 0, 0, 0.75), 0 1px 4px rgba(0, 0, 0, 0.45);
+  }
+
+  /* Unfinished setup is not a resting state — the app cannot do its job — so
+     it does not get to recede like an idle one. */
+  .pill[data-ready='false'][data-state='idle'] .lamp {
+    background: #f2b544;
+    animation: breathe 2.4s ease-in-out infinite;
+  }
+  @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  /* ------------------------------------------------------------ the lamp */
+  .lamp {
+    width: 8px; height: 8px; border-radius: 50%;
+    flex: 0 0 auto;
+    background: #6b6b74;
+    transition: background 160ms ease;
+  }
+  /* Green at rest: the app is up and listening for the shortcut. It shares a
+     colour with a finished transcription, which cannot be confused with it —
+     that one arrives with words beside it and at full opacity. */
+  .pill[data-state='idle'] .lamp { background: #4ade80; }
   .pill[data-state='recording'] .lamp {
     background: #e8422f;
     box-shadow: 0 0 0 0 rgba(232, 66, 47, 0.55);
     animation: ping 1.8s cubic-bezier(.22,1,.36,1) infinite;
   }
+  /* The ring stops at 5px. The pill clips its contents so the bloom looks
+     right, and a wider ring would be sliced off against the pill's edge. */
   @keyframes ping {
     0%   { box-shadow: 0 0 0 0 rgba(232,66,47,.5); }
-    70%  { box-shadow: 0 0 0 8px rgba(232,66,47,0); }
+    70%  { box-shadow: 0 0 0 5px rgba(232,66,47,0); }
     100% { box-shadow: 0 0 0 0 rgba(232,66,47,0); }
   }
+  .pill[data-state='transcribing'] .lamp { background: #f2b544; }
   .pill[data-state='done'] .lamp { background: #4ade80; }
   .pill[data-state='error'] .lamp { background: #e8422f; }
 
@@ -80,83 +135,89 @@
   }
   .pill[data-locked='true'] { border-color: rgba(232, 66, 47, 0.45); }
 
-  /* the meter is the signature: real levels, not a decorative loop */
-  .meter { display: flex; align-items: center; gap: 2.5px; height: 16px; flex: 0 0 auto; }
+  /* ------------------------------------------------------------ the body */
+  /* One slot, shared. The meter lives here while there is audio to show and
+     a message takes its place when there is something to say, so neither can
+     push the other along and change the width. */
+  .body { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; }
+
+  .meter { display: flex; align-items: center; gap: 2px; height: 14px; flex: 0 0 auto; }
   .meter i {
     display: block;
-    width: 2.5px;
-    min-height: 2.5px;
-    border-radius: 2px;
+    width: 2px;
+    min-height: 2px;
+    border-radius: 1px;
     background: #e8422f;
     transform-origin: center;
     transition: height 70ms linear, opacity 200ms ease;
   }
   /* Transcribing has no live signal to show, but going still reads as
-     "nothing is happening". The bars run as a travelling wave instead, so
-     there is always visible evidence that the app is still working. */
+     "nothing is happening". The bars run as a travelling wave instead. */
   .pill[data-state='transcribing'] .meter i {
-    background: #e8422f;
+    background: #f2b544;
     transition: none;
     animation: work 1.15s ease-in-out infinite;
-    animation-delay: calc(var(--i, 0) * 45ms);
+    animation-delay: calc(var(--i, 0) * 40ms);
   }
   @keyframes work {
     0%, 100% { transform: scaleY(1); opacity: 0.3; }
-    45%      { transform: scaleY(4.2); opacity: 1; }
+    45%      { transform: scaleY(3.6); opacity: 1; }
   }
-
-  .label { font-size: 11.5px; color: #b4b4bb; white-space: nowrap; }
-  .time {
-    font-size: 11.5px; color: #f4f4f5;
-    font-variant-numeric: tabular-nums;
-    min-width: 30px; text-align: right;
-    flex: 0 0 auto;
-  }
-
-  /* The bars themselves carry the transcribing animation now. A gradient
-     sweeping over them as well read as a solid block sitting on the meter. */
-  .sweep { position: relative; overflow: hidden; }
 
   .msg {
-    font-size: 11.5px;
-    max-width: 200px;
+    font-size: 10.5px;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     color: #b4b4bb;
-    flex: 0 1 auto;
   }
   .pill[data-state='error'] .msg { color: #ff8b7a; }
   .pill[data-state='done'] .msg { color: #a7e8bd; }
 
-  /* A result the user still has to act on — it was copied, not pasted —
-     carries the transcript itself so they can see it was heard correctly
-     without opening anything. */
-  .snippet {
-    font-size: 11.5px;
-    color: #82828c;
-    max-width: 190px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    border-left: 1px solid rgba(255,255,255,0.12);
-    padding-left: 9px;
-    flex: 0 1 auto;
-  }
+  /* A message and a meter never occupy the slot at the same time. */
+  .msg[hidden] { display: none; }
+  .body:has(.msg:not([hidden])) .meter { display: none; }
 
-  /* Once recording stops there is no live signal to show, and leaving the
-     meter in place pushed the result message past the window edge. */
-  .pill[data-state='done'] .meter,
-  .pill[data-state='error'] .meter { display: none; }
+  /* ------------------------------------------------------------ the clock */
+  .time {
+    font-size: 10.5px;
+    line-height: 1;
+    color: #f4f4f5;
+    font-variant-numeric: tabular-nums;
+    min-width: 30px;
+    text-align: right;
+    flex: 0 0 auto;
+  }
+  /* Hidden rather than removed while idle, so the meter sits in exactly the
+     position it will occupy once recording starts and nothing shifts under
+     the eye at the moment the user begins talking. */
+  .pill[data-state='idle'] .time { visibility: hidden; }
+  /* Removed outright once there is a message, which then gets the full width
+     — the pill is the same size either way, only its insides differ. */
+  .pill[data-state='done'] .time,
+  .pill[data-state='error'] .time { display: none; }
 </style>
 </head>
 <body>
   <div id="wrap">
     <div class="pill" id="pill" data-state="idle">
       <span class="lamp"></span>
-      <span class="meter sweep" id="meter"></span>
-      <span class="msg" id="msg" hidden></span>
-      <span class="snippet" id="snippet" hidden></span>
+      <span class="mic" aria-hidden="true">
+        <svg width="11" height="14" viewBox="0 0 11 14" fill="none"
+             stroke="currentColor" stroke-width="1.1"
+             stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3.6" y="0.9" width="3.8" height="7" rx="1.9"/>
+          <path d="M1.4 6.4v0.6a4.1 4.1 0 0 0 8.2 0v-0.6"/>
+          <path d="M5.5 11.1v2"/>
+        </svg>
+      </span>
+      <span class="body">
+        <span class="meter" id="meter"></span>
+        <span class="msg" id="msg" hidden></span>
+      </span>
       <span class="time" id="time">0:00</span>
     </div>
   </div>

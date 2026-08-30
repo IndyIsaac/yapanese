@@ -34,8 +34,11 @@ contextBridge.exposeInMainWorld('yapanese', {
   diagnostics: () => ipcRenderer.invoke('diagnostics'),
   openDataDir: () => ipcRenderer.invoke('open:dataDir'),
 
-  // hud chrome (HUD window only)
-  hudResize: (width, height) => ipcRenderer.send('hud:resize', { width, height }),
+  // hud chrome (HUD window only). The form is a name — 'rest' or 'active' —
+  // and never a measurement: the window being resized to fit whatever the
+  // renderer had drawn is what used to inflate it a pixel at a time on a
+  // fractionally scaled display.
+  hudForm: (form) => ipcRenderer.send('hud:form', form),
   hudDragStart: () => ipcRenderer.send('hud:drag-start'),
   hudDragEnd: () => ipcRenderer.send('hud:drag-end'),
   hudInteractive: (on) => ipcRenderer.send('hud:interactive', on),
