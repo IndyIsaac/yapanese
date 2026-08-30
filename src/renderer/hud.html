@@ -47,15 +47,29 @@
 
   /* Resting, it is a marker rather than a status bar — quiet enough to leave
      on screen all day, and it says nothing, because a word that reads "Ready"
-     all day is just noise. The dot and the flat meter are the whole message. */
-  .pill[data-state='idle'],
-  .pill[data-state='idle'].in { opacity: 0.42; }
-  .pill[data-state='idle']:hover.in { opacity: 1; }
+     all day is just noise. The dot and the waveform are the whole message.
+
+     The chrome recedes, not the pill. Fading the whole element with `opacity`
+     takes the green dot down with it, and a status light you have to squint at
+     is not doing its job — a child cannot be more opaque than its parent. So
+     the background, the border and the shadow are dialled back individually
+     and the dot is left alone. */
+  .pill[data-state='idle'] {
+    background: rgba(19, 19, 21, 0.52);
+    border-color: rgba(255, 255, 255, 0.05);
+    box-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.55);
+    transition: transform 220ms cubic-bezier(.22,1,.36,1), opacity 170ms ease-out,
+                background 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+  }
+  .pill[data-state='idle']:hover.in,
+  .pill[data-ready='false'][data-state='idle'] {
+    background: rgba(19, 19, 21, 0.92);
+    border-color: rgba(255, 255, 255, 0.09);
+    box-shadow: 0 10px 26px -8px rgba(0, 0, 0, 0.75), 0 1px 4px rgba(0, 0, 0, 0.45);
+  }
 
   /* Unfinished setup is not a resting state — the app cannot do its job — so
-     it does not get to fade into the background like an idle one. */
-  .pill[data-ready='false'][data-state='idle'],
-  .pill[data-ready='false'][data-state='idle'].in { opacity: 1; }
+     it does not get to recede like an idle one. */
   .pill[data-ready='false'][data-state='idle'] .lamp {
     background: #f2b544;
     animation: breathe 2.4s ease-in-out infinite;
@@ -69,6 +83,10 @@
     background: #6b6b74;
     transition: background 160ms ease;
   }
+  /* Green at rest: the app is up and listening for the shortcut. It shares a
+     colour with a finished transcription, which cannot be confused with it —
+     that one arrives with words beside it and at full opacity. */
+  .pill[data-state='idle'] .lamp { background: #4ade80; }
   .pill[data-state='recording'] .lamp {
     background: #e8422f;
     box-shadow: 0 0 0 0 rgba(232, 66, 47, 0.55);
@@ -107,17 +125,19 @@
     transform-origin: center;
     transition: height 70ms linear, opacity 200ms ease;
   }
-  /* At rest the bars are the symbol: a flat, dim row that says the app is
-     listening for the shortcut without spelling it out.
+  /* At rest the bars hold a still waveform — the whole of what the pill says
+     when it is idle, in place of the word it used to carry.
 
-     !important because the levels are written as inline styles while
-     recording and are still on the elements afterwards — without it, going
-     back to idle left a row of bars wearing the last thing that was said. */
+     !important because the live levels are written as inline styles while
+     recording and are still on the elements afterwards; without it, going
+     back to idle left the shape wearing the last thing that was said. */
   .pill[data-state='idle'] .meter i {
-    background: #8a8a93;
-    opacity: 0.5 !important;
-    height: 2px !important;
+    background: #9aa0a6;
+    opacity: 0.62 !important;
+    height: var(--idle-h, 2px) !important;
+    transition: none;
   }
+  .pill[data-state='idle']:hover .meter i { opacity: 0.85 !important; }
   /* Transcribing has no live signal to show, but going still reads as
      "nothing is happening". The bars run as a travelling wave instead. */
   .pill[data-state='transcribing'] .meter i {

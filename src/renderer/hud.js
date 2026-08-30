@@ -15,9 +15,21 @@ const BAR_MIN_PX = 2;
 const BAR_MAX_PX = 14;
 const SAMPLE_RATE = 16000;
 
+/**
+ * The resting shape: a still waveform, symmetric about the middle.
+ *
+ * This is the whole of what the pill says when it is idle. It replaced the
+ * word "Ready", which is a label you read once and then keep looking at all
+ * day. Held as a per-bar custom property rather than set as an inline height,
+ * so the stylesheet can apply it with !important and beat the live levels that
+ * are still on the elements from the last recording.
+ */
+const IDLE_WAVE = [2, 3, 5, 8, 6, 11, 14, 10, 13, 10, 14, 11, 6, 8, 5, 3, 2];
+
 const bars = Array.from({ length: BAR_COUNT }, (_, i) => {
   const b = document.createElement('i');
   b.style.height = `${BAR_MIN_PX}px`;
+  b.style.setProperty('--idle-h', `${IDLE_WAVE[i]}px`);
   // Position along the meter, so the transcribing animation can stagger
   // across the bars from CSS rather than being driven from here.
   b.style.setProperty('--i', String(i));

@@ -794,6 +794,22 @@ function tickHudDrag() {
   // returns a rectangle one pixel larger than the one that was set — so it
   // grew the window a pixel per call, 125 times a second, while dragging.
   hud.setBounds(hudBoundsAt(at.x, at.y));
+
+  // Every so often, check the window actually went where it was put. The
+  // previous version of this bug was invisible for months because nothing
+  // ever compared the two; a drifting pill is a subjective complaint until
+  // there is a number in the log saying how far off it was, and by then the
+  // user has given up describing it.
+  hudDrag.ticks = (hudDrag.ticks || 0) + 1;
+  if (!hudDrag.warned && hudDrag.ticks % 32 === 0) {
+    const got = hud.getBounds();
+    if (Math.abs(got.x - at.x) > 2 || Math.abs(got.y - at.y) > 2 ||
+        hudIsInflated(got)) {
+      hudDrag.warned = true;
+      log('hud: DRAG DIVERGENCE — asked', `${at.x},${at.y} ${HUD_WIDTH}x${HUD_HEIGHT}`,
+          'got', `${got.x},${got.y} ${got.width}x${got.height}`);
+    }
+  }
 }
 
 ipcMain.on('hud:drag-start', () => {
