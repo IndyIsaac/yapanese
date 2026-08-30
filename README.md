@@ -108,7 +108,7 @@ After that, the app makes no network requests at all.
 git clone https://github.com/IndyIsaac/yapanese.git
 cd yapanese
 npm install
-npm run dist       # -> dist\Yapanese Setup <version>.exe
+npm run dist       # -> dist\Yapanese-Setup-<version>.exe
 npm start          # or just run it from source
 ```
 
@@ -207,18 +207,24 @@ double-tap is possible with them.
 
 ### The indicator
 
-The pill sits at the bottom of the screen and tells you what the app is
-doing. Drag it anywhere — it stays where you put it, and comes back there
-next launch. Clicking it opens your history.
+At rest it is a small badge — a green light and a microphone. Drag it
+anywhere; it stays where you put it and comes back there next launch.
+Clicking it opens your history.
+
+Start dictating and it blooms outwards from that spot into the full pill:
+live levels and a running clock while you talk, then a line saying whether
+the words were pasted or copied and how many there were. Then it folds back
+to the badge. A copied transcript stays up longer than a pasted one, because
+it is a job you still have to finish.
 
 It is deliberately present when idle rather than appearing only once you
 start talking: an indicator you cannot see is indistinguishable from an app
-that has stopped working. If it is genuinely in the way, turn it off in
-Settings and it reverts to showing only while dictating.
+that has stopped working. It recedes into the desktop when you are not near
+it and comes forward when your pointer is. If it is genuinely in the way,
+turn it off in Settings and it reverts to showing only while dictating.
 
-When a transcript is copied rather than pasted, the pill shows the opening
-words and stays up longer, so you can tell it heard you correctly without
-opening anything.
+An amber light instead of green means setup is unfinished — and dictation is
+refused until it is done.
 
 Transcripts live as plain JSON in `%APPDATA%\Yapanese` — readable, portable and
 deletable without this app being involved.
@@ -288,6 +294,17 @@ Bumping the pinned whisper.cpp release means editing `WHISPER_RELEASE` in
 `Get-FileHash -Algorithm SHA256` produces them, and
 `node tools/test-setup.js --install` proves they are right against the real
 endpoints.
+
+One trap if you touch the indicator. **Never use `win.setPosition` on it, and
+never size the window to something the renderer measured.** On a fractionally
+scaled display — 150% is the common one — `getBounds` reports the *enclosing*
+DIP rectangle, so a size read back is a pixel larger than the size that was
+set. `setPosition` does that read-modify-write internally, so it inflates the
+window on every call: measured, 300 calls took a 170×42 window to 469×343, and
+a drag makes about 125 of those a second. Reposition with `setBounds` and state
+the width and height explicitly, chosen from a constant. The indicator has two
+sizes and the renderer selects between them **by name**, never by measurement,
+for exactly this reason.
 
 ## Credits
 
