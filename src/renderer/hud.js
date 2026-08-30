@@ -15,21 +15,9 @@ const BAR_MIN_PX = 2;
 const BAR_MAX_PX = 14;
 const SAMPLE_RATE = 16000;
 
-/**
- * The resting shape: a still waveform, symmetric about the middle.
- *
- * This is the whole of what the pill says when it is idle. It replaced the
- * word "Ready", which is a label you read once and then keep looking at all
- * day. Held as a per-bar custom property rather than set as an inline height,
- * so the stylesheet can apply it with !important and beat the live levels that
- * are still on the elements from the last recording.
- */
-const IDLE_WAVE = [2, 3, 5, 8, 6, 11, 14, 10, 13, 10, 14, 11, 6, 8, 5, 3, 2];
-
 const bars = Array.from({ length: BAR_COUNT }, (_, i) => {
   const b = document.createElement('i');
   b.style.height = `${BAR_MIN_PX}px`;
-  b.style.setProperty('--idle-h', `${IDLE_WAVE[i]}px`);
   // Position along the meter, so the transcribing animation can stagger
   // across the bars from CSS rather than being driven from here.
   b.style.setProperty('--i', String(i));
@@ -101,6 +89,42 @@ function cancelPending() {
  */
 const MSG_MAX = 22;
 
+/**
+ * Resting badge, or the full pill.
+ *
+ * The main process is told a name, not a size — it maps 'rest' and 'active'
+ * onto two constants of its own. Nothing measured crosses this boundary, which
+ * is what keeps the width free to change without the window creeping.
+ *
+ * Order matters in both directions, because the window clips the pill:
+ * growing, the window has to be wide before the pill is; shrinking, the pill
+ * has to be narrow before the window is.
+ */
+const FORM_MS = 180;
+
+let form = 'rest';
+let formTimer = null;
+
+function setForm(next) {
+  if (next === form) return;
+  form = next;
+  clearTimeout(formTimer);
+
+  if (next === 'active') {
+    api.hudForm('active');
+    // A frame's grace for the window to actually be wider. Widening the pill
+    // in the same tick draws it clipped for a frame or two.
+    formTimer = setTimeout(() => {
+      if (form === 'active') pill.classList.add('wide');
+    }, 20);
+  } else {
+    pill.classList.remove('wide');
+    formTimer = setTimeout(() => {
+      if (form === 'rest') api.hudForm('rest');
+    }, FORM_MS + 60);
+  }
+}
+
 function setState(state, message) {
   pill.dataset.state = state;
   msgEl.hidden = !message;
@@ -108,6 +132,9 @@ function setState(state, message) {
     msgEl.textContent = message.length > MSG_MAX ? `${message.slice(0, MSG_MAX - 1)}…` : message;
     msgEl.title = message;
   }
+  // Idle is the badge. Everything else — recording, transcribing, and the
+  // moment a result is being reported — needs the room.
+  setForm(state === 'idle' ? 'rest' : 'active');
 }
 
 function show() {
@@ -131,9 +158,10 @@ let ready = true;
  * Back to the resting state, which carries no words at all.
  *
  * It used to read "Ready" — a label the user reads once and then has to keep
- * looking at all day. A green dot and a still waveform say the same thing
- * without asking for attention, and an amber dot says setup is unfinished; the
- * setup window itself does the explaining.
+ * looking at all day, and then a still waveform, which borrowed the one shape
+ * that should mean "listening to you right now". What is left is a green light
+ * and a microphone, in a badge small enough to forget about. An amber light
+ * means setup is unfinished; the setup window does the explaining.
  *
  * Whether the window then goes away is not decided here. The main process
  * hides it only if the user turned the indicator off, so for everyone else

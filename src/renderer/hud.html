@@ -24,13 +24,22 @@
      indicator to life, not replace it with something twice the size. */
   #wrap { width: 100%; height: 100%; display: grid; place-items: center; }
 
+  /* Resting width. `wide` is the recording form; the difference between the
+     two is a straight width transition, and because the window is centred on
+     the same point in both, the pill blooms outwards from the badge rather
+     than unrolling to one side.
+
+     overflow: hidden is what makes the bloom look deliberate — the contents
+     are already laid out at full width and get revealed as the pill opens,
+     instead of appearing all at once at the end. */
   .pill {
-    width: 144px;
+    width: 48px;
     height: 26px;
+    overflow: hidden;
     display: flex;
     align-items: center;
     gap: 7px;
-    padding: 0 11px;
+    padding: 0 10px;
     border-radius: 999px;
     background: rgba(19, 19, 21, 0.92);
     border: 1px solid rgba(255, 255, 255, 0.09);
@@ -40,14 +49,26 @@
     cursor: grab;
     transform: translateY(6px) scale(0.98);
     opacity: 0;
-    transition: transform 220ms cubic-bezier(.22,1,.36,1), opacity 170ms ease-out;
+    transition: width 180ms cubic-bezier(.22,1,.36,1),
+                transform 220ms cubic-bezier(.22,1,.36,1), opacity 170ms ease-out;
   }
+  .pill.wide { width: 144px; }
   .pill.in { transform: none; opacity: 1; }
+  /* No width transition while being dragged — a resize arriving mid-drag would
+     animate the pill out from under the cursor. */
   .pill.dragging { cursor: grabbing; transition: none; }
+
+  /* The badge shows a microphone; the full pill shows the meter and the clock.
+     Both are in the markup at all times so the bloom reveals a finished layout
+     rather than building one as it opens. */
+  .mic { display: flex; align-items: center; color: #8b8b95; flex: 0 0 auto; }
+  .pill.wide .mic,
+  .pill:not(.wide) .body,
+  .pill:not(.wide) .time { display: none; }
 
   /* Resting, it is a marker rather than a status bar — quiet enough to leave
      on screen all day, and it says nothing, because a word that reads "Ready"
-     all day is just noise. The dot and the waveform are the whole message.
+     all day is just noise. A light and a microphone are the whole message.
 
      The chrome recedes, not the pill. Fading the whole element with `opacity`
      takes the green dot down with it, and a status light you have to squint at
@@ -58,9 +79,12 @@
     background: rgba(19, 19, 21, 0.52);
     border-color: rgba(255, 255, 255, 0.05);
     box-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.55);
-    transition: transform 220ms cubic-bezier(.22,1,.36,1), opacity 170ms ease-out,
+    transition: width 180ms cubic-bezier(.22,1,.36,1),
+                transform 220ms cubic-bezier(.22,1,.36,1), opacity 170ms ease-out,
                 background 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
   }
+  .pill[data-state='idle'] .mic { color: #6f7079; transition: color 200ms ease; }
+  .pill[data-state='idle']:hover .mic { color: #a6a6b0; }
   .pill[data-state='idle']:hover.in,
   .pill[data-ready='false'][data-state='idle'] {
     background: rgba(19, 19, 21, 0.92);
@@ -92,9 +116,11 @@
     box-shadow: 0 0 0 0 rgba(232, 66, 47, 0.55);
     animation: ping 1.8s cubic-bezier(.22,1,.36,1) infinite;
   }
+  /* The ring stops at 5px. The pill clips its contents so the bloom looks
+     right, and a wider ring would be sliced off against the pill's edge. */
   @keyframes ping {
     0%   { box-shadow: 0 0 0 0 rgba(232,66,47,.5); }
-    70%  { box-shadow: 0 0 0 7px rgba(232,66,47,0); }
+    70%  { box-shadow: 0 0 0 5px rgba(232,66,47,0); }
     100% { box-shadow: 0 0 0 0 rgba(232,66,47,0); }
   }
   .pill[data-state='transcribing'] .lamp { background: #f2b544; }
@@ -125,19 +151,6 @@
     transform-origin: center;
     transition: height 70ms linear, opacity 200ms ease;
   }
-  /* At rest the bars hold a still waveform — the whole of what the pill says
-     when it is idle, in place of the word it used to carry.
-
-     !important because the live levels are written as inline styles while
-     recording and are still on the elements afterwards; without it, going
-     back to idle left the shape wearing the last thing that was said. */
-  .pill[data-state='idle'] .meter i {
-    background: #9aa0a6;
-    opacity: 0.62 !important;
-    height: var(--idle-h, 2px) !important;
-    transition: none;
-  }
-  .pill[data-state='idle']:hover .meter i { opacity: 0.85 !important; }
   /* Transcribing has no live signal to show, but going still reads as
      "nothing is happening". The bars run as a travelling wave instead. */
   .pill[data-state='transcribing'] .meter i {
@@ -192,6 +205,15 @@
   <div id="wrap">
     <div class="pill" id="pill" data-state="idle">
       <span class="lamp"></span>
+      <span class="mic" aria-hidden="true">
+        <svg width="11" height="14" viewBox="0 0 11 14" fill="none"
+             stroke="currentColor" stroke-width="1.1"
+             stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3.6" y="0.9" width="3.8" height="7" rx="1.9"/>
+          <path d="M1.4 6.4v0.6a4.1 4.1 0 0 0 8.2 0v-0.6"/>
+          <path d="M5.5 11.1v2"/>
+        </svg>
+      </span>
       <span class="body">
         <span class="meter" id="meter"></span>
         <span class="msg" id="msg" hidden></span>

@@ -48,16 +48,49 @@ let recordingStartedAt = 0;
  * A constant size removes the read-modify-write entirely: nothing ever asks
  * the window how big it is, so nothing can round it up.
  */
-// 164x42 wraps a 144x26 pill plus the margin its shadow needs. The recording
-// form used to be about 208px against an idle form of 108, which is the jump
-// that made dictating feel like something barged onto the screen.
-const HUD_WIDTH = 164;
+// Two forms, two constants. Resting is a badge — a light and a microphone —
+// and it blooms into the full pill to record.
+//
+// The width changing again is deliberate, and it is safe for a reason worth
+// stating: the sizes below are *named constants the renderer selects between*,
+// never a measurement it reports. The old bug was a feedback loop — the
+// renderer measured itself, the window was set to that, and reading it back on
+// a fractionally scaled display returned a value one pixel larger, which was
+// then set again. Choosing between two fixed numbers cannot accumulate.
+const HUD_WIDTH = { rest: 68, active: 164 };
 const HUD_HEIGHT = 42;
+
+/** How much wider the active form is on each side. The bloom is centred, so
+ *  the badge's midpoint stays exactly where the user put it. */
+const HUD_GROW = (HUD_WIDTH.active - HUD_WIDTH.rest) / 2;
+
+/** rest | active — which form is on screen. */
+let hudForm = 'rest';
+
+/**
+ * Where the resting badge's top-left is.
+ *
+ * This is the one stored position, and the active form is derived from it
+ * rather than remembered separately. Growing and shrinking is therefore
+ * exactly reversible: the pill always comes back to the same pixel, however
+ * many times it has been through the cycle.
+ */
+let hudRest = null;
 
 /** Every reposition goes through here. Passing the size explicitly on each
  *  move is the fix — `setPosition` is the call that inflates. */
-function hudBoundsAt(x, y) {
-  return { x, y, width: HUD_WIDTH, height: HUD_HEIGHT };
+function hudBoundsAt(x, y, form = hudForm) {
+  return { x, y, width: HUD_WIDTH[form], height: HUD_HEIGHT };
+}
+
+/** The window's left edge for a form, given where the resting badge sits. */
+function hudXFor(form, restX) {
+  return form === 'active' ? restX - HUD_GROW : restX;
+}
+
+/** The inverse: the resting badge's left edge, given a window in some form. */
+function hudRestXFrom(form, x) {
+  return form === 'active' ? x + HUD_GROW : x;
 }
 
 /**
@@ -72,8 +105,9 @@ function hudBoundsAt(x, y) {
  */
 const HUD_SIZE_SLACK = 6;
 
-function hudIsInflated(b) {
-  return b.width > HUD_WIDTH + HUD_SIZE_SLACK || b.height > HUD_HEIGHT + HUD_SIZE_SLACK;
+function hudIsInflated(b, form = hudForm) {
+  return b.width > HUD_WIDTH[form] + HUD_SIZE_SLACK ||
+         b.height > HUD_HEIGHT + HUD_SIZE_SLACK;
 }
 
 /**
@@ -176,8 +210,34 @@ function defaultHudPosition(w, h) {
   };
 }
 
+/**
+ * Put the window where the given form belongs.
+ *
+ * Always computed from `hudRest`, never from the window's current bounds —
+ * deriving one position from another is how the pill used to walk across the
+ * screen a pixel at a time.
+ */
+function hudPlace(form) {
+  if (!hud || hud.isDestroyed() || !hudRest) return;
+
+  if (hudDrag) {
+    // Mid-drag — a recording started while the pill was being held. Let the
+    // drag keep steering; it will pick up the new width on its next tick. The
+    // grab offset shifts with the bloom so the pill does not jump out of the
+    // hand as it grows.
+    hudDrag.dx += form === 'active' ? HUD_GROW : -HUD_GROW;
+    hudDrag.form = form;
+    hudForm = form;
+    return;
+  }
+
+  hudForm = form;
+  const at = clampToDisplay(hudXFor(form, hudRest.x), hudRest.y, HUD_WIDTH[form], HUD_HEIGHT);
+  hud.setBounds(hudBoundsAt(at.x, at.y, form));
+}
+
 function createHud() {
-  const w = HUD_WIDTH;
+  const w = HUD_WIDTH.rest;
   const h = HUD_HEIGHT;
 
   // A position saved by an older build was written while the window was
@@ -188,6 +248,7 @@ function createHud() {
   const at = saved
     ? clampToDisplay(saved.x, saved.y, w, h)
     : defaultHudPosition(w, h);
+  hudRest = { x: at.x, y: at.y };
 
   hud = new BrowserWindow({
     width: w,
@@ -223,14 +284,15 @@ function createHud() {
   // every screen — indistinguishable, from the user's side, from the bug
   // where it silently stopped appearing.
   const reseat = () => {
-    if (!hud || hud.isDestroyed()) return;
+    if (!hud || hud.isDestroyed() || !hudRest) return;
     const b = hud.getBounds();
-    const at2 = clampToDisplay(b.x, b.y, HUD_WIDTH, HUD_HEIGHT);
+    const at2 = clampToDisplay(b.x, b.y, HUD_WIDTH[hudForm], HUD_HEIGHT);
     // The size is restated as well as the position: this is also the repair
     // path for a window an older build had already inflated.
     if (at2.x !== b.x || at2.y !== b.y || hudIsInflated(b)) {
       hud.setBounds(hudBoundsAt(at2.x, at2.y));
-      store.updateSettings({ hudPosition: at2 });
+      hudRest = { x: hudRestXFrom(hudForm, at2.x), y: at2.y };
+      store.updateSettings({ hudPosition: hudRest });
       log('hud: reseated onto a visible display');
     }
   };
@@ -292,9 +354,8 @@ function applyHudVisibility() {
   if (wanted) {
     const b = hud.getBounds();
     if (hudIsInflated(b)) {
-      const at = clampToDisplay(b.x, b.y, HUD_WIDTH, HUD_HEIGHT);
-      hud.setBounds(hudBoundsAt(at.x, at.y));
       log('hud: corrected an inflated window from', `${b.width}x${b.height}`);
+      hudPlace(hudForm);
     }
   }
   if (wanted && !hud.isVisible()) hud.showInactive();
@@ -647,8 +708,8 @@ ipcMain.handle('settings:set', (_e, patch) => {
   // "Reset position" only forgets where the pill is rather than putting it
   // back somewhere the user can find it.
   if ('hudPosition' in patch && !patch.hudPosition && hud && !hud.isDestroyed()) {
-    const home = defaultHudPosition(HUD_WIDTH, HUD_HEIGHT);
-    hud.setBounds(hudBoundsAt(home.x, home.y));
+    hudRest = defaultHudPosition(HUD_WIDTH.rest, HUD_HEIGHT);
+    hudPlace(hudForm);
   }
   return next;
 });
@@ -783,7 +844,7 @@ function tickHudDrag() {
     cursor,
     cursor.x - hudDrag.dx,
     cursor.y - hudDrag.dy,
-    HUD_WIDTH,
+    HUD_WIDTH[hudDrag.form],
     HUD_HEIGHT
   );
 
@@ -793,7 +854,7 @@ function tickHudDrag() {
   // current bounds back and re-applies them, and on a 150% display that read
   // returns a rectangle one pixel larger than the one that was set — so it
   // grew the window a pixel per call, 125 times a second, while dragging.
-  hud.setBounds(hudBoundsAt(at.x, at.y));
+  hud.setBounds(hudBoundsAt(at.x, at.y, hudDrag.form));
 
   // Every so often, check the window actually went where it was put. The
   // previous version of this bug was invisible for months because nothing
@@ -804,9 +865,10 @@ function tickHudDrag() {
   if (!hudDrag.warned && hudDrag.ticks % 32 === 0) {
     const got = hud.getBounds();
     if (Math.abs(got.x - at.x) > 2 || Math.abs(got.y - at.y) > 2 ||
-        hudIsInflated(got)) {
+        hudIsInflated(got, hudDrag.form)) {
       hudDrag.warned = true;
-      log('hud: DRAG DIVERGENCE — asked', `${at.x},${at.y} ${HUD_WIDTH}x${HUD_HEIGHT}`,
+      log('hud: DRAG DIVERGENCE — asked',
+          `${at.x},${at.y} ${HUD_WIDTH[hudDrag.form]}x${HUD_HEIGHT}`,
           'got', `${got.x},${got.y} ${got.width}x${got.height}`);
     }
   }
@@ -821,6 +883,7 @@ ipcMain.on('hud:drag-start', () => {
   hudDrag = {
     dx: cursor.x - b.x,
     dy: cursor.y - b.y,
+    form: hudForm,
     last: { x: b.x, y: b.y },
     startedAt: Date.now(),
     timer: setInterval(tickHudDrag, HUD_DRAG_INTERVAL_MS),
@@ -829,13 +892,37 @@ ipcMain.on('hud:drag-start', () => {
 
 ipcMain.on('hud:drag-end', () => {
   if (!hudDrag) return;
+  const form = hudDrag.form;
   stopHudDrag();
   if (!hud || hud.isDestroyed()) return;
   const b = hud.getBounds();
-  store.updateSettings({ hudPosition: { x: b.x, y: b.y } });
-  // The size is logged as well as the position. It should never change, and
-  // the one time it did, it did so silently for months.
-  log('hud: moved to', `${b.x},${b.y}`, `size ${b.width}x${b.height}`);
+  // Stored as the resting badge's position whatever form was being dragged,
+  // so there is only ever one remembered place and the two forms cannot
+  // disagree about where the pill lives.
+  hudRest = { x: hudRestXFrom(form, b.x), y: b.y };
+  store.updateSettings({ hudPosition: hudRest });
+  // The size is logged as well as the position. It should never change within
+  // a form, and the one time it did, it did so silently for months.
+  log('hud: moved to', `${hudRest.x},${hudRest.y}`,
+      `(${form} form, window ${b.width}x${b.height})`);
+});
+
+/**
+ * The renderer selecting one of the two forms.
+ *
+ * It sends a name, never a measurement. That distinction is the whole reason
+ * the width is allowed to change again: the main process maps the name onto a
+ * constant, so there is no value here that can be read back, rounded up, and
+ * fed in again.
+ *
+ * Ordering is the renderer's job — it grows the window before widening the
+ * pill, and narrows the pill before shrinking the window, so the pill is never
+ * drawn wider than the window holding it.
+ */
+ipcMain.on('hud:form', (_e, form) => {
+  if (form !== 'rest' && form !== 'active') return;
+  if (form === hudForm) return;
+  hudPlace(form);
 });
 
 // Click-through everywhere except the pill itself, so an always-on-screen
