@@ -131,7 +131,7 @@ let ready = true;
  * Back to the resting state, which carries no words at all.
  *
  * It used to read "Ready" — a label the user reads once and then has to keep
- * looking at all day. The dot and the flat row of bars say the same thing
+ * looking at all day. A green dot and a still waveform say the same thing
  * without asking for attention, and an amber dot says setup is unfinished; the
  * setup window itself does the explaining.
  *
