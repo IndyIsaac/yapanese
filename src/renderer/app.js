@@ -161,8 +161,14 @@ searchEl.addEventListener('input', () => { query = searchEl.value; renderHistory
 
 // --------------------------------------------------------------- settings
 
+// Chromium reports two aliases alongside the real devices — 'communications'
+// and 'default', labelled "Default - <whatever Windows is using>". Neither is
+// a device. 'default' is exactly what asking for no device gives you, so with
+// "System default" in the list as its own option it would appear twice under
+// two names, one of which silently changes meaning when Windows switches.
 const audioInputs = async () => (await navigator.mediaDevices.enumerateDevices())
-  .filter((d) => d.kind === 'audioinput' && d.deviceId !== 'communications');
+  .filter((d) => d.kind === 'audioinput'
+    && d.deviceId !== 'communications' && d.deviceId !== 'default');
 
 /**
  * The input devices, with their labels.
@@ -194,6 +200,12 @@ async function loadDevices() {
   }
 
   select.disabled = false;
+  // A setting saved from an older build may name the 'default' alias, which is
+  // no longer offered. It always meant "whatever Windows is using", so migrate
+  // it to the option that says exactly that instead of reporting it missing.
+  if (settings.micDevice && /^Default - /.test(settings.micDevice)) {
+    settings = await api.setSettings({ micDevice: null });
+  }
   const saved = settings.micDevice || '';
   // Only what the operating system currently offers can appear here. A
   // Bluetooth headset that is connected for audio *output* has no capture
