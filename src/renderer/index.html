@@ -116,6 +116,17 @@
               <select id="mic"></select>
             </div>
           </div>
+          <div class="note" id="mic-missing" hidden>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 8.5v5"/><circle cx="12" cy="16.8" r=".9" fill="currentColor" stroke="none"/><path d="M10.3 3.9L2.6 17.2A1.9 1.9 0 0 0 4.3 20h15.4a1.9 1.9 0 0 0 1.7-2.8L13.7 3.9a1.9 1.9 0 0 0-3.4 0z"/>
+            </svg>
+            <div>
+              <b><span id="mic-missing-name">That microphone</span> is not connected.</b>
+              Recordings will use the system default instead. Bluetooth earbuds only
+              offer a microphone once Windows switches them to hands-free mode — until
+              then they are an output device and nothing here can record from them.
+            </div>
+          </div>
           <div class="field">
             <div class="label">
               <b>Ignore background noise</b>

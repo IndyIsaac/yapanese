@@ -161,26 +161,71 @@ searchEl.addEventListener('input', () => { query = searchEl.value; renderHistory
 
 // --------------------------------------------------------------- settings
 
+const audioInputs = async () => (await navigator.mediaDevices.enumerateDevices())
+  .filter((d) => d.kind === 'audioinput' && d.deviceId !== 'communications');
+
+/**
+ * The input devices, with their labels.
+ *
+ * Labels are blank until the page has been granted microphone access, and a
+ * silent getUserMedia grants it. That grant only has to happen once, so it is
+ * worth checking first: this runs again every time a device is plugged in or
+ * removed, and opening the microphone lights up the system's "in use"
+ * indicator — and can itself nudge a Bluetooth headset into changing profile.
+ */
+async function listInputs() {
+  const first = await audioInputs();
+  if (first.length && first.every((d) => d.label)) return first;
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  stream.getTracks().forEach((t) => t.stop());
+  return audioInputs();
+}
+
 async function loadDevices() {
   const select = el('mic');
   let devices = [];
   try {
-    // Labels require permission; a silent getUserMedia grants it once.
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach((t) => t.stop());
-    devices = (await navigator.mediaDevices.enumerateDevices())
-      .filter((d) => d.kind === 'audioinput' && d.deviceId !== 'communications');
+    devices = await listInputs();
   } catch {
     select.innerHTML = '<option>Microphone access blocked</option>';
     select.disabled = true;
     return;
   }
 
-  select.innerHTML = devices
-    .map((d) => `<option value="${escapeHtml(d.label)}">${escapeHtml(d.label || 'Unnamed device')}</option>`)
-    .join('');
-  if (settings.micDevice) select.value = settings.micDevice;
+  select.disabled = false;
+  const saved = settings.micDevice || '';
+  // Only what the operating system currently offers can appear here. A
+  // Bluetooth headset that is connected for audio *output* has no capture
+  // endpoint until Windows brings up the hands-free profile, so it genuinely
+  // is not in this list — that is the OS, not a filter of ours.
+  const present = devices.some((d) => d.label === saved);
+
+  // An explicit default beats an implicit one. Without this the first device
+  // in the list looks chosen when nothing is, and picking "whatever Windows
+  // is using" was impossible to express once you had chosen anything else.
+  const options = ['<option value="">System default</option>'];
+  for (const d of devices) {
+    options.push(`<option value="${escapeHtml(d.label)}">${escapeHtml(d.label || 'Unnamed device')}</option>`);
+  }
+  // A saved device that has gone away stays in the list, selected. Dropping it
+  // would silently re-point the setting at another microphone, and the user
+  // would have no idea their choice had been thrown away when the headset
+  // reconnected.
+  if (saved && !present) {
+    options.push(`<option value="${escapeHtml(saved)}">${escapeHtml(saved)} — not connected</option>`);
+  }
+  select.innerHTML = options.join('');
+  select.value = saved;
+
+  el('mic-missing').hidden = !saved || present;
+  if (saved && !present) el('mic-missing-name').textContent = saved;
 }
+
+// Headsets connect and disconnect while this window is open, and the list was
+// only ever built once at startup — so plugging in the thing you came here to
+// select left you staring at a dropdown that did not contain it.
+navigator.mediaDevices?.addEventListener('devicechange', () => { loadDevices(); });
 
 const COMBO_NAMES = {
   'ctrl+win': 'Ctrl + Win',
@@ -229,7 +274,10 @@ el('combo').addEventListener('change', async (e) => {
   renderSettings();
 });
 el('mic').addEventListener('change', async (e) => {
-  settings = await api.setSettings({ micDevice: e.target.value });
+  // '' is the "System default" option; store it as null, which is what the
+  // settings default already means, rather than inventing a second empty value.
+  settings = await api.setSettings({ micDevice: e.target.value || null });
+  await loadDevices();
 });
 el('vad').addEventListener('change', async (e) => {
   settings = await api.setSettings({ vad: e.target.checked });

@@ -305,6 +305,12 @@ async function start({ deviceLabel, skipSilence }) {
     ticker = setInterval(tick, 250);
 
     const deviceId = await resolveDeviceId(deviceLabel);
+    // Falling back to the default is silent otherwise, and the case that
+    // matters is a Bluetooth headset that has dropped: you carry on talking
+    // quietly into earbuds while the laptop's own microphone is what is
+    // actually recording. Worth two seconds of the meter's slot to say so.
+    if (deviceLabel && !deviceId) hint('Default mic', 2000);
+
     mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         deviceId: deviceId ? { exact: deviceId } : undefined,
