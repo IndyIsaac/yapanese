@@ -222,6 +222,14 @@ flashes `Default mic` on the indicator if a recording starts without it —
 talking quietly into earbuds while the laptop's own microphone is the one
 listening is the failure worth catching.
 
+Automatic gain is left on for these and off for everything else. Hands-free
+microphones are quiet by construction: measured against a built-in array on
+the same machine, the noise floor sat about fourteen times lower, and speech
+that recorded well from the array fell under the silence threshold from the
+headset and was discarded as empty. Gain control costs some of that
+threshold's sensitivity, which is why it is not on everywhere, but without it
+these devices do not work at all.
+
 ### The indicator
 
 At rest it is a small badge — a green light and a microphone. Drag it

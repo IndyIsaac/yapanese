@@ -267,19 +267,39 @@ function tick() {
  * comparison therefore misses, and the capture silently falls back to the
  * system default, which is rarely the device the user chose.
  */
-async function resolveDeviceId(label) {
+async function resolveDevice(label) {
   if (!label) return undefined;
   const inputs = (await navigator.mediaDevices.enumerateDevices())
     .filter((d) => d.kind === 'audioinput');
 
   const exact = inputs.find((d) => d.label === label);
-  if (exact) return exact.deviceId;
+  if (exact) return exact;
 
   const partial = inputs.find((d) => d.label.startsWith(label) || label.startsWith(d.label));
-  if (partial) return partial.deviceId;
+  if (partial) return partial;
 
   return undefined;
 }
+
+/**
+ * Whether automatic gain should be left on for a device.
+ *
+ * It is off everywhere else on purpose: gain chasing drives room noise up to
+ * full scale, which degrades transcription and blunts the silence guard.
+ *
+ * A Bluetooth headset is the exception, and not by a small margin. Its
+ * microphone arrives over the hands-free profile, which is narrowband and
+ * quiet by construction — measured on this machine, the noise floor came in
+ * around fourteen times below the built-in array, and speech that recorded at
+ * an RMS of 0.0078 on the array landed under the 0.002 silence threshold from
+ * the headset. Every recording was thrown away as too quiet. Gain control on
+ * costs some of the silence guard's sensitivity for these devices; off costs
+ * the device entirely.
+ *
+ * Chromium tags Bluetooth inputs in the label, which is the only signal
+ * available before the stream is open.
+ */
+const wantsAutoGain = (label) => /\(bluetooth\)|hands-?free/i.test(label || '');
 
 let currentDeviceLabel = '';
 let skipSilenceGuard = false;
@@ -304,25 +324,41 @@ async function start({ deviceLabel, skipSilence }) {
     show();
     ticker = setInterval(tick, 250);
 
-    const deviceId = await resolveDeviceId(deviceLabel);
+    const device = await resolveDevice(deviceLabel);
     // Falling back to the default is silent otherwise, and the case that
     // matters is a Bluetooth headset that has dropped: you carry on talking
     // quietly into earbuds while the laptop's own microphone is what is
     // actually recording. Worth two seconds of the meter's slot to say so.
-    if (deviceLabel && !deviceId) hint('Default mic', 2000);
+    if (deviceLabel && !device) hint('Default mic', 2000);
+
+    // The chosen device's own label, not the saved one — a saved label can be
+    // stale, and when nothing was chosen the system default still needs
+    // classifying. See wantsAutoGain for why Bluetooth is the exception.
+    const autoGain = wantsAutoGain(device ? device.label : deviceLabel);
 
     mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        deviceId: deviceId ? { exact: deviceId } : undefined,
+        deviceId: device ? { exact: device.deviceId } : undefined,
         channelCount: 1,
         echoCancellation: false,
         noiseSuppression: true,
-        // Automatic gain drives room noise up to full scale, which both
-        // degrades transcription and makes it impossible to tell silence
-        // from speech. Whisper prefers natural levels anyway.
-        autoGainControl: false,
+        autoGainControl: autoGain,
       },
     });
+
+    // Without a chosen device the system default is whatever Windows says,
+    // and that can be the headset too. Its label only becomes readable once
+    // the stream is open, so the constraint gets a second chance here.
+    if (!autoGain) {
+      const track = mediaStream.getAudioTracks()[0];
+      if (track && wantsAutoGain(track.label)) {
+        try {
+          await track.applyConstraints({ autoGainControl: true });
+          // main.js mirrors this window's console into the debug log.
+          console.log('capture: enabled automatic gain for', track.label);
+        } catch { /* not fatal — a quiet recording beats no recording */ }
+      }
+    }
 
     audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
     await audioContext.audioWorklet.addModule('./collector-worklet.js');

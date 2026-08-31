@@ -1,7 +1,7 @@
 {
   "name": "yapanese",
   "productName": "Yapanese",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Local dictation for Windows. Hold a key, talk, and the text lands where your cursor is.",
   "main": "src/main/main.js",
   "author": "Indy",
