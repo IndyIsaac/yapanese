@@ -205,6 +205,23 @@ double-tap is possible with them.
 | Keep the indicator on screen | on | Off shows it only while dictating |
 | Start with Windows | off | Launches hidden in the tray |
 
+### Bluetooth headsets
+
+The list holds whatever Windows currently exposes as an input, and it updates
+as devices come and go. Bluetooth earbuds are the awkward case: connected for
+music they are an *output* only, and no microphone of theirs exists for any
+application to record from until Windows brings up the hands-free profile.
+If yours appears under Output but not Input, that is the state you are in —
+re-pairing usually settles it.
+
+Two things follow from choosing one. Hands-free audio is narrowband, so your
+music drops to call quality for as long as you are recording; and the device
+disappears whenever the earbuds sleep. Yapanese keeps a disconnected choice
+selected rather than silently swapping it, says so under the dropdown, and
+flashes `Default mic` on the indicator if a recording starts without it —
+talking quietly into earbuds while the laptop's own microphone is the one
+listening is the failure worth catching.
+
 ### The indicator
 
 At rest it is a small badge — a green light and a microphone. Drag it
