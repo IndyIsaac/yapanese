@@ -712,6 +712,11 @@ ipcMain.handle('settings:set', (_e, patch) => {
     app.setLoginItemSettings({ openAtLogin: !!patch.launchAtLogin, args: ['--hidden'] });
   }
   if ('showIndicator' in patch) applyHudVisibility();
+  // Turned on with an update already waiting: fetch it now rather than at the
+  // next check, six hours away.
+  if (patch.autoDownloadUpdates && updater.current().state === 'available') {
+    updater.download();
+  }
   // Clearing the saved position has to move the window too, otherwise
   // "Reset position" only forgets where the pill is rather than putting it
   // back somewhere the user can find it.
@@ -1099,7 +1104,14 @@ if (!app.requestSingleInstanceLock()) {
     try { announceRecovered(importOrphans()); }
     catch (err) { log('recovery: failed —', err.message); }
 
-    updater.start({ onStatus: onUpdateStatus, log });
+    updater.start({
+      onStatus: onUpdateStatus,
+      log,
+      // Anything but idle means a dictation is in flight, which an automatic
+      // restart must never cut into.
+      isBusy: () => state !== 'idle',
+      autoDownload: () => !!store.settings().autoDownloadUpdates,
+    });
   });
 
   app.on('will-quit', () => {

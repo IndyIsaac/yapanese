@@ -255,8 +255,12 @@ window: what the version is, one line on what changed, and a button.
 Nothing is downloaded until that button is pressed. An app that quietly pulls
 a hundred megabytes over somebody's tethered connection has made a decision
 that was not its to make — and this one is otherwise careful never to touch
-the network. Once downloaded, the update applies on a restart, which the app
-does for you.
+the network. If you would rather not be asked, turn on **Download updates in
+the background** in Settings › Updates.
+
+Once downloaded, the update installs itself: Yapanese restarts into the new
+version after it has been left alone for half a minute, so it never cuts off a
+dictation. **Restart now** on the bar does it straight away.
 
 <details>
 <summary>Cutting a release</summary>

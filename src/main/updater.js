@@ -1,6 +1,7 @@
 'use strict';
 
 const { app } = require('electron');
+const restartScheduler = require('./restart-scheduler');
 
 /**
  * Updates.
@@ -10,10 +11,14 @@ const { app } = require('electron');
  * asks GitHub whether there is a newer release, tells the user in one
  * sentence, and does the rest on one click.
  *
- * Nothing is downloaded without being asked for. An app that quietly pulls a
- * hundred megabytes over somebody's tethered connection has made a decision
- * that was not its to make — and this one is otherwise scrupulous about not
- * touching the network.
+ * Nothing is downloaded without being asked for, unless the user has turned
+ * on background downloads in Settings. An app that quietly pulls a hundred
+ * megabytes over somebody's tethered connection has made a decision that was
+ * not its to make — and this one is otherwise scrupulous about not touching
+ * the network. Off by default for that reason.
+ *
+ * Once an update is downloaded it installs itself: the app restarts into it
+ * after half a minute of not being used, so a dictation is never cut off.
  *
  * Every state change is reported through `onStatus`, and the shape is always
  * the same: `{ state, version?, percent?, error? }`.
@@ -40,6 +45,8 @@ let status = { state: 'idle' };
 let report = () => {};
 let logLine = () => {};
 let timer = null;
+let autoDownload = () => false;
+let restarter = null;
 
 function set(next) {
   status = next;
@@ -80,6 +87,12 @@ function attach() {
   updater.on('update-available', (info) => {
     logLine('update: available —', info.version);
     set({ state: 'available', version: info.version, notes: releaseNotes(info) });
+    // Read at the moment it matters, so switching the setting takes effect
+    // without a restart.
+    if (autoDownload()) {
+      logLine('update: downloading in the background');
+      download();
+    }
   });
 
   updater.on('update-not-available', () => set({ state: 'none' }));
@@ -91,6 +104,8 @@ function attach() {
   updater.on('update-downloaded', (info) => {
     logLine('update: downloaded —', info.version);
     set({ state: 'ready', version: info.version, notes: releaseNotes(info) });
+    logLine('update: will restart after', restartScheduler.IDLE_MS / 1000, 's idle');
+    restarter?.arm();
   });
 
   return updater;
@@ -128,6 +143,9 @@ async function check({ silent = true } = {}) {
 
 async function download() {
   if (!supported()) return { ok: false, error: 'Updates only apply to an installed copy.' };
+  // A background download may already be under way when the button is
+  // pressed, or be done.
+  if (status.state === 'downloading' || status.state === 'ready') return { ok: true };
   try {
     set({ state: 'downloading', version: status.version, percent: 0 });
     await attach().downloadUpdate();
@@ -150,20 +168,33 @@ async function download() {
 function install() {
   if (!supported() || status.state !== 'ready') return { ok: false };
   logLine('update: installing', status.version);
+  restarter?.disarm();
   app.isQuitting = true;
   setImmediate(() => attach().quitAndInstall(true, true));
   return { ok: true };
 }
 
-function start({ onStatus, log }) {
+/**
+ * `isBusy` says whether a recording or transcription is in progress, so the
+ * automatic restart can wait for it. `autoDownload` reads the setting.
+ */
+function start({ onStatus, log, isBusy = () => false, autoDownload: shouldAutoDownload }) {
   report = onStatus || (() => {});
   logLine = log || (() => {});
+  if (shouldAutoDownload) autoDownload = shouldAutoDownload;
 
   if (!supported()) {
     logLine('update: skipped — not a packaged build');
     return;
   }
 
+  restarter = restartScheduler.create({
+    isBusy,
+    restart: () => {
+      logLine('update: idle, restarting into', status.version);
+      install();
+    },
+  });
   setTimeout(() => check(), FIRST_CHECK_DELAY_MS);
   timer = setInterval(() => {
     // Nothing to look for once one is already downloaded and waiting.
@@ -175,6 +206,7 @@ function start({ onStatus, log }) {
 function stop() {
   clearInterval(timer);
   timer = null;
+  restarter?.disarm();
 }
 
 module.exports = { start, stop, check, download, install, current: () => status };

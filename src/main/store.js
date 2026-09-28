@@ -16,6 +16,7 @@ const DEFAULT_SETTINGS = {
   combo: 'ctrl+win',          // see hotkeys.js COMBOS
   autoPaste: true,
   launchAtLogin: false,
+  autoDownloadUpdates: false, // off: a download waits for the user to ask
   speed: 'balanced',          // 'accurate' | 'balanced' | 'fast'
   vad: true,                  // discard non-speech before transcribing
   showIndicator: true,        // keep the dictation pill on screen when idle
