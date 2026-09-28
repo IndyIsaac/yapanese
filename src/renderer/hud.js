@@ -301,6 +301,20 @@ function release(stream, context) {
   try { context?.close(); } catch {}
 }
 
+function startErrorMessage(err) {
+  return err && err.name === 'NotAllowedError'
+    ? 'Microphone access was denied. Allow it in Windows Settings › Privacy › Microphone.'
+    : `Could not start recording: ${err?.message || err}`;
+}
+
+/**
+ * The most recent start(), settling to the error that stopped it, if any. A
+ * stop that finds nothing recorded waits on this, so a microphone refused
+ * just after the key came up is reported as that rather than as silence.
+ */
+let pendingStart = Promise.resolve(null);
+const START_WAIT_MS = 3000;
+
 async function start({ deviceLabel, skipSilence }) {
   const session = ++captureSession;
   const current = () => session === captureSession;
@@ -377,22 +391,20 @@ async function start({ deviceLabel, skipSilence }) {
     mediaStream = stream;
     audioContext = context;
     workletNode = node;
+    return null;
   } catch (err) {
-    // Stopped while still starting: whatever this call opened is its own to
-    // close, and stop() has already reported the outcome.
-    if (!current()) { release(stream, context); return; }
     release(stream, context);
+    // Stopped while still starting: whatever this call opened was its own to
+    // close, and stop() reports the outcome, using this error if there is one.
+    if (!current()) return err === ABANDONED ? null : err;
     teardown();
     // Short enough to read at this width. The sentence explaining what to do
     // about it goes to the main window, which has room for it.
     setState('error', 'No microphone');
     show();
-    api.sendError(
-      err && err.name === 'NotAllowedError'
-        ? 'Microphone access was denied. Allow it in Windows Settings › Privacy › Microphone.'
-        : `Could not start recording: ${err?.message || err}`
-    );
+    api.sendError(startErrorMessage(err));
     later(settle, 3600);
+    return null;
   }
 }
 
@@ -400,8 +412,7 @@ function teardown() {
   clearInterval(ticker);
   ticker = null;
   try { workletNode?.disconnect(); } catch {}
-  try { mediaStream?.getTracks().forEach((t) => t.stop()); } catch {}
-  try { audioContext?.close(); } catch {}
+  release(mediaStream, audioContext);
   workletNode = null;
   mediaStream = null;
   audioContext = null;
@@ -431,7 +442,14 @@ function stop() {
 
   if (count === 0) {
     setState('error', 'Nothing recorded');
-    api.sendError('No audio was captured. Check that the right microphone is selected.');
+    // Main stays in "transcribing" until this is reported, so nothing new
+    // can start while it waits. Capped in case the microphone never answers.
+    const timeout = new Promise((r) => setTimeout(r, START_WAIT_MS, null));
+    Promise.race([pendingStart, timeout]).then((err) => {
+      api.sendError(err
+        ? startErrorMessage(err)
+        : 'No audio was captured. Check that the right microphone is selected.');
+    });
     later(settle, 3600);
     return;
   }
@@ -556,7 +574,7 @@ pill.addEventListener('pointerup', (e) => endDrag(e.pointerId));
 pill.addEventListener('pointercancel', (e) => endDrag(e.pointerId));
 pill.addEventListener('lostpointercapture', () => endDrag(null));
 
-api.on('capture:start', start);
+api.on('capture:start', (opts) => { pendingStart = start(opts); });
 api.on('capture:stop', stop);
 
 // Locked recording looks different from hold-to-talk: the user needs to know
