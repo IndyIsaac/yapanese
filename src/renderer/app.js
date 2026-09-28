@@ -387,7 +387,8 @@ function renderUpdateSetting(status) {
     : status.state === 'none' ? 'Up to date.'
     : 'Checked automatically.';
 
-  button.disabled = status.state === 'checking' || status.state === 'downloading';
+  // Nothing to ask GitHub while one is already fetched and waiting to install.
+  button.disabled = ['checking', 'downloading', 'ready'].includes(status.state);
 }
 
 el('update-check').addEventListener('click', async () => {

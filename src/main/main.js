@@ -370,8 +370,21 @@ function applyHudVisibility() {
   else if (!wanted && hud.isVisible()) hud.hide();
 }
 
+let retranscribing = 0;
+
+/**
+ * Tells the updater whether anything is running that restarting into an
+ * update would cut off: a dictation, a model install on the setup screen, or
+ * a recording being transcribed again from history. Called whenever any of
+ * them starts or finishes.
+ */
+function reportBusy() {
+  updater.setBusy(state !== 'idle' || !!installing || retranscribing > 0);
+}
+
 function setState(next, detail = {}) {
   state = next;
+  reportBusy();
   hud?.webContents.send('state', { state: next, ...detail });
   mainWindow?.webContents.send('state', { state: next, ...detail });
   updateTray();
@@ -714,9 +727,7 @@ ipcMain.handle('settings:set', (_e, patch) => {
   if ('showIndicator' in patch) applyHudVisibility();
   // Turned on with an update already waiting: fetch it now rather than at the
   // next check, six hours away.
-  if (patch.autoDownloadUpdates && updater.current().state === 'available') {
-    updater.download();
-  }
+  if ('autoDownloadUpdates' in patch) updater.settingsChanged();
   // Clearing the saved position has to move the window too, otherwise
   // "Reset position" only forgets where the pill is rather than putting it
   // back somewhere the user can find it.
@@ -753,11 +764,19 @@ ipcMain.handle('history:transcribe', async (_e, id) => {
     return { ok: false, error: 'The audio for that recording is missing.', history: store.history() };
   }
 
-  const result = await transcribe({
-    wavPath: entry.audioPath,
-    durationSeconds: (entry.durationMs || 0) / 1000,
-    settings: store.settings(),
-  });
+  retranscribing++;
+  reportBusy();
+  let result;
+  try {
+    result = await transcribe({
+      wavPath: entry.audioPath,
+      durationSeconds: (entry.durationMs || 0) / 1000,
+      settings: store.settings(),
+    });
+  } finally {
+    retranscribing--;
+    reportBusy();
+  }
   log('history:transcribe ->', result.ok ? `ok: ${redact(result.text)}` : `error: ${result.error}`);
 
   if (!result.ok) {
@@ -994,6 +1013,7 @@ ipcMain.handle('setup:install', async (_e, choice) => {
 
   const controller = new AbortController();
   installing = controller;
+  reportBusy();
   try {
     const res = await setup.install(choice, {
       signal: controller.signal,
@@ -1007,6 +1027,7 @@ ipcMain.handle('setup:install', async (_e, choice) => {
     return { ...res, state: await refreshReadiness() };
   } finally {
     installing = null;
+    reportBusy();
   }
 });
 
@@ -1085,8 +1106,14 @@ if (!app.requestSingleInstanceLock()) {
     // A machine that cannot transcribe yet opens on setup whatever it was
     // asked for — including at login, because starting hidden and silently
     // broken is how a user ends up thinking the app does not work.
+    //
+    // Coming back from an automatic update counts as hidden too: it happened
+    // while the user was busy elsewhere, and a window appearing would take
+    // their focus mid-sentence.
+    const quietRelaunch = updater.consumeQuietRelaunch();
+    if (quietRelaunch) log('startup: back from an automatic update, staying in the tray');
     if (!state0.ready) showMainWindow('setup');
-    else if (!process.argv.includes('--hidden')) showMainWindow('history');
+    else if (!process.argv.includes('--hidden') && !quietRelaunch) showMainWindow('history');
 
     const res = await setupHotkeys();
     if (!res.ok) {
@@ -1107,9 +1134,6 @@ if (!app.requestSingleInstanceLock()) {
     updater.start({
       onStatus: onUpdateStatus,
       log,
-      // Anything but idle means a dictation is in flight, which an automatic
-      // restart must never cut into.
-      isBusy: () => state !== 'idle',
       autoDownload: () => !!store.settings().autoDownloadUpdates,
     });
   });

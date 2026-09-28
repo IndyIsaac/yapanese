@@ -1,7 +1,9 @@
 'use strict';
 
+const path = require('node:path');
 const { app } = require('electron');
 const restartScheduler = require('./restart-scheduler');
+const quietRelaunch = require('./quiet-relaunch');
 
 /**
  * Updates.
@@ -47,6 +49,12 @@ let logLine = () => {};
 let timer = null;
 let autoDownload = () => false;
 let restarter = null;
+let relaunch = null;
+
+// An installer that will not start is not retried forever in the background;
+// "Restart now" still works after this many.
+const MAX_AUTO_ATTEMPTS = 3;
+let autoAttempts = 0;
 
 function set(next) {
   status = next;
@@ -67,9 +75,10 @@ function attach() {
   const { autoUpdater } = require('electron-updater');
   updater = autoUpdater;
 
-  // Both off deliberately: the user decides when to download, and an install
-  // that happens silently on quit would change the app under somebody who
-  // never agreed to it.
+  // Both off: electron-updater's own versions of these would download
+  // regardless of the setting and install on quit mid-whatever. Downloading
+  // is decided by maybeAutoDownload() and installing by the restart
+  // scheduler, which waits for the app to be idle.
   updater.autoDownload = false;
   updater.autoInstallOnAppQuit = false;
   updater.logger = null;
@@ -87,12 +96,7 @@ function attach() {
   updater.on('update-available', (info) => {
     logLine('update: available —', info.version);
     set({ state: 'available', version: info.version, notes: releaseNotes(info) });
-    // Read at the moment it matters, so switching the setting takes effect
-    // without a restart.
-    if (autoDownload()) {
-      logLine('update: downloading in the background');
-      download();
-    }
+    maybeAutoDownload();
   });
 
   updater.on('update-not-available', () => set({ state: 'none' }));
@@ -105,6 +109,7 @@ function attach() {
     logLine('update: downloaded —', info.version);
     set({ state: 'ready', version: info.version, notes: releaseNotes(info) });
     logLine('update: will restart after', restartScheduler.IDLE_MS / 1000, 's idle');
+    autoAttempts = 0;
     restarter?.arm();
   });
 
@@ -127,11 +132,24 @@ function releaseNotes(info) {
   return firstLine.length > 160 ? `${firstLine.slice(0, 158)}…` : firstLine;
 }
 
+/**
+ * The one place the background-download setting is applied. Read at the
+ * moment it matters, so switching it takes effect without a restart.
+ */
+function maybeAutoDownload() {
+  if (status.state !== 'available' || !autoDownload()) return;
+  logLine('update: downloading in the background');
+  download();
+}
+
 async function check({ silent = true } = {}) {
   if (!supported()) {
     set({ state: 'none', unsupported: true });
     return status;
   }
+  // Asking again with one already fetched moves the status off "ready", and
+  // the waiting restart would then refuse to run.
+  if (status.state === 'ready' || status.state === 'downloading') return status;
   try {
     await attach().checkForUpdates();
   } catch (err) {
@@ -161,24 +179,38 @@ async function download() {
 /**
  * Restart into the new version.
  *
- * `isSilent: true` skips the installer's wizard — the user already agreed to
- * this and does not need to click Next. The second argument reopens the app
- * afterwards, so the restart lands them back where they were.
+ * `isSilent: true` skips the installer's wizard: either the user pressed
+ * "Restart now", or they left the app idle with an update waiting, which the
+ * update bar says will install it. The second argument reopens the app
+ * afterwards. `quiet` is the automatic case, whose relaunch stays in the tray
+ * rather than opening a window over whatever the user is doing.
  */
-function install() {
+function install({ quiet = false } = {}) {
   if (!supported() || status.state !== 'ready') return { ok: false };
-  logLine('update: installing', status.version);
+  logLine('update: installing', status.version, quiet ? '(automatic)' : '');
   restarter?.disarm();
+  if (quiet) relaunch?.mark();
   app.isQuitting = true;
-  setImmediate(() => attach().quitAndInstall(true, true));
+  setImmediate(() => {
+    try {
+      attach().quitAndInstall(true, true);
+    } catch (err) {
+      // Still running, so nothing about quitting may linger: the window's
+      // close button would quit the app instead of hiding it to the tray.
+      logLine('update: install failed —', err?.message || String(err));
+      app.isQuitting = false;
+      relaunch?.clear();
+      if (quiet && autoAttempts < MAX_AUTO_ATTEMPTS) restarter?.arm();
+    }
+  });
   return { ok: true };
 }
 
 /**
- * `isBusy` says whether a recording or transcription is in progress, so the
- * automatic restart can wait for it. `autoDownload` reads the setting.
+ * `autoDownload` reads the setting. `setTimer`/`clearTimer` exist for tests.
+ * Busy and idle are reported separately, through setBusy(), as they change.
  */
-function start({ onStatus, log, isBusy = () => false, autoDownload: shouldAutoDownload }) {
+function start({ onStatus, log, autoDownload: shouldAutoDownload, setTimer, clearTimer }) {
   report = onStatus || (() => {});
   logLine = log || (() => {});
   if (shouldAutoDownload) autoDownload = shouldAutoDownload;
@@ -188,12 +220,15 @@ function start({ onStatus, log, isBusy = () => false, autoDownload: shouldAutoDo
     return;
   }
 
+  relaunch = quietRelaunch.create({ file: quietRelaunchFile() });
   restarter = restartScheduler.create({
-    isBusy,
     restart: () => {
+      autoAttempts++;
       logLine('update: idle, restarting into', status.version);
-      install();
+      install({ quiet: true });
     },
+    ...(setTimer && { setTimer }),
+    ...(clearTimer && { clearTimer }),
   });
   setTimeout(() => check(), FIRST_CHECK_DELAY_MS);
   timer = setInterval(() => {
@@ -203,10 +238,32 @@ function start({ onStatus, log, isBusy = () => false, autoDownload: shouldAutoDo
   }, CHECK_INTERVAL_MS);
 }
 
+function quietRelaunchFile() {
+  return path.join(app.getPath('userData'), 'relaunch-quietly');
+}
+
+/**
+ * Whether this launch is the app coming back from an automatic update. Read
+ * once, at startup; works before start() has run.
+ */
+function consumeQuietRelaunch() {
+  return quietRelaunch.create({ file: quietRelaunchFile() }).consume();
+}
+
+/** Called by main whenever a dictation, a model install or a
+ *  re-transcription starts or finishes. */
+function setBusy(busy) {
+  restarter?.setBusy(busy);
+}
+
 function stop() {
   clearInterval(timer);
   timer = null;
   restarter?.disarm();
 }
 
-module.exports = { start, stop, check, download, install, current: () => status };
+module.exports = {
+  start, stop, check, download, install, setBusy, consumeQuietRelaunch,
+  settingsChanged: maybeAutoDownload,
+  current: () => status,
+};
