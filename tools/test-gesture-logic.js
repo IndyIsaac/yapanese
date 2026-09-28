@@ -34,11 +34,21 @@ function harness() {
 
   return {
     g, events,
+    // Fires due timers in order, at their own time, including any a timer
+    // sets while firing — which is how real timers behave.
     advance(ms) {
-      clock += ms;
-      for (const [id, t] of [...timers]) {
-        if (t.at <= clock) { timers.delete(id); t.fn(); }
+      const target = clock + ms;
+      for (;;) {
+        let next = null;
+        for (const [id, t] of timers) {
+          if (t.at <= target && (!next || t.at < next[1].at)) next = [id, t];
+        }
+        if (!next) break;
+        timers.delete(next[0]);
+        clock = next[1].at;
+        next[1].fn();
       }
+      clock = target;
     },
     comboDown() { g.key(CTRL, true); g.key(WIN, true); },
     comboUp() { g.key(WIN, false); g.key(CTRL, false); },
@@ -51,6 +61,8 @@ function harness() {
   h.comboDown();
   h.advance(2000);
   h.comboUp();
+  // A release only counts once it has outlasted the bounce window.
+  h.advance(gestures.BOUNCE_MS);
   check('hold -> start then finish', h.events, ['start', 'finish']);
 }
 
@@ -134,6 +146,42 @@ function harness() {
   h.g.reset();
   check('reset clears recording', h.g.isRecording(), false);
   check('reset clears lock', h.g.isLocked(), false);
+}
+
+// 9. A burst of key events faster than fingers can move is noise, not taps.
+//    Replays the debug log: start, lock, finish all inside 13ms of one press,
+//    which started a recording and killed it before any audio arrived.
+{
+  const h = harness();
+  h.comboDown();
+  h.advance(3); h.comboUp();
+  h.advance(3); h.comboDown();
+  h.advance(4); h.comboUp();
+  h.advance(3); h.comboDown();
+  check('bounce burst -> one start, no lock or finish', h.events, ['start']);
+  h.advance(2000); h.comboUp(); h.advance(100);
+  check('bounce burst then hold -> finishes on release', h.events, ['start', 'finish']);
+}
+
+// 10. A bounce during the locking press does not count as the stop tap.
+//     Also from the log: locked on, then "tap while locked" 9ms later.
+{
+  const h = harness();
+  h.comboDown(); h.advance(80); h.comboUp();
+  h.advance(150); h.comboDown();
+  h.advance(4); h.g.key(WIN, false); h.advance(3); h.g.key(WIN, true);
+  h.advance(80); h.comboUp();
+  h.advance(2000);
+  check('bounce while locking -> still locked', h.events, ['start', 'lock']);
+}
+
+// 11. A fast human double tap still locks.
+{
+  const h = harness();
+  h.comboDown(); h.advance(60); h.comboUp();
+  h.advance(70); h.comboDown(); h.advance(60); h.comboUp();
+  h.advance(3000);
+  check('fast double tap -> lock', h.events, ['start', 'lock']);
 }
 
 console.log(failures === 0 ? '\nall gesture tests passed' : `\n${failures} FAILING`);
