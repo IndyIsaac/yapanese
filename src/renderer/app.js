@@ -240,6 +240,7 @@ function renderSettings() {
   el('vad').checked = settings.vad !== false;
   el('autopaste').checked = !!settings.autoPaste;
   el('autostart').checked = !!settings.launchAtLogin;
+  el('autoupdate').checked = !!settings.autoDownloadUpdates;
   el('indicator').checked = settings.showIndicator !== false;
   el('indicator-pos').textContent = settings.hudPosition
     ? `Moved to ${settings.hudPosition.x}, ${settings.hudPosition.y}.`
@@ -288,6 +289,9 @@ el('autopaste').addEventListener('change', async (e) => {
 el('autostart').addEventListener('change', async (e) => {
   settings = await api.setSettings({ launchAtLogin: e.target.checked });
 });
+el('autoupdate').addEventListener('change', async (e) => {
+  settings = await api.setSettings({ autoDownloadUpdates: e.target.checked });
+});
 el('indicator').addEventListener('change', async (e) => {
   settings = await api.setSettings({ showIndicator: e.target.checked });
 });
@@ -309,8 +313,9 @@ el('clear-history').addEventListener('click', async () => {
  * One bar, one button.
  *
  * Most people running this will never look at a changelog or a releases page.
- * The whole interaction is: something is available, press this, press it once
- * more to restart. Dismissing it hides the bar for this session only — the
+ * The whole interaction is: something is available, press this. Once it has
+ * downloaded, the app restarts into it by itself after half a minute of not
+ * being used, or straight away from "Restart now". Dismissing it hides the bar for this session only — the
  * next launch offers it again, because an update that fixes the bug you are
  * about to hit should keep asking.
  */
@@ -343,7 +348,7 @@ function renderUpdate(status) {
     action.disabled = true;
   } else {
     el('update-title').textContent = `Version ${status.version} is ready`;
-    el('update-note').textContent = 'Restart to finish. It takes a couple of seconds.';
+    el('update-note').textContent = 'Installs by itself once Yapanese has been idle for half a minute, or restart now.';
     action.textContent = 'Restart now';
     action.disabled = false;
   }
@@ -376,13 +381,14 @@ function renderUpdateSetting(status) {
     status.state === 'checking' ? 'Checking…'
     : status.state === 'available' ? `${status.version} available.`
     : status.state === 'downloading' ? `Downloading ${status.version} — ${status.percent || 0}%`
-    : status.state === 'ready' ? `${status.version} ready — restart to finish.`
+    : status.state === 'ready' ? `${status.version} ready — installs when idle.`
     : status.state === 'error' ? 'Could not reach GitHub.'
     : status.unsupported ? 'Installed copies only.'
     : status.state === 'none' ? 'Up to date.'
     : 'Checked automatically.';
 
-  button.disabled = status.state === 'checking' || status.state === 'downloading';
+  // Nothing to ask GitHub while one is already fetched and waiting to install.
+  button.disabled = ['checking', 'downloading', 'ready'].includes(status.state);
 }
 
 el('update-check').addEventListener('click', async () => {
