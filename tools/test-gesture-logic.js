@@ -184,5 +184,14 @@ function harness() {
   check('fast double tap -> lock', h.events, ['start', 'lock']);
 }
 
+// 12. Changing the combo just after a hold is released still finishes it.
+{
+  const h = harness();
+  h.comboDown(); h.advance(2000); h.comboUp();
+  h.advance(10); h.g.setCombo('ctrl+shift');
+  h.advance(1000);
+  check('combo change inside bounce window -> still finishes', h.events, ['start', 'finish']);
+}
+
 console.log(failures === 0 ? '\nall gesture tests passed' : `\n${failures} FAILING`);
 process.exit(failures === 0 ? 0 : 1);

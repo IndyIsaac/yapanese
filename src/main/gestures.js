@@ -64,6 +64,7 @@ function create({
   let locked = false;
   let tapTimer = null;
   let releaseTimer = null;
+  let releasedAt = 0;
   let recording = false;
 
   const groupSatisfied = (group) => group.some((code) => down.has(code));
@@ -75,6 +76,12 @@ function create({
 
   function clearReleaseTimer() {
     if (releaseTimer) { clearTimer(releaseTimer); releaseTimer = null; }
+  }
+
+  /** Act on a release that has outlasted the bounce window. */
+  function settleRelease() {
+    clearReleaseTimer();
+    onComboUp(releasedAt);
   }
 
   function beginRecording() {
@@ -162,18 +169,17 @@ function create({
         onComboDown();
       } else if (!held && comboActive) {
         comboActive = false;
-        const releasedAt = now();
-        releaseTimer = setTimer(() => {
-          releaseTimer = null;
-          onComboUp(releasedAt);
-        }, BOUNCE_MS);
+        releasedAt = now();
+        releaseTimer = setTimer(settleRelease, BOUNCE_MS);
       }
     },
 
     setCombo(id) {
       comboId = COMBO_KEYS[id] ? id : DEFAULT_COMBO;
       keys = COMBO_KEYS[comboId];
-      clearReleaseTimer();
+      // A release still waiting out the bounce window is settled now rather
+      // than dropped, or a hold released just before this would never finish.
+      if (releaseTimer) settleRelease();
       down.clear();
       comboActive = false;
       locked = false;
