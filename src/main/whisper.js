@@ -122,6 +122,14 @@ async function transcribe({ wavPath, durationSeconds, settings, onProgress }) {
     // on non-speech audio, happily picks a random language and returns
     // gibberish. A fixed language is both faster and far more predictable.
     '-l', settings.language && settings.language !== 'auto' ? settings.language : 'en',
+    // Past 30 seconds whisper decodes in windows, each primed with the text
+    // of the one before. One shaky window then poisons the next: it drops
+    // whole sentences or loops a phrase ("I want to compare three options,
+    // and I want to compare three options..."). Measured on clean speech,
+    // this took an 87s clip from 10% to 4% word error and a 2-minute one
+    // from 37% to 5%, at the same speed. Clips under 30s are one window and
+    // are unaffected.
+    '-mc', '0',
   ];
   if (preset.trimContext) {
     const ac = audioContextFor(durationSeconds);

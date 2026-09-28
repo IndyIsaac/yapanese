@@ -284,7 +284,42 @@ async function resolveDeviceId(label) {
 let currentDeviceLabel = '';
 let skipSilenceGuard = false;
 
+/**
+ * Which capture is current. start() waits on the microphone and the worklet,
+ * and a stop can land during either wait. Before this was tracked, the start
+ * carried on regardless and built a full audio graph that nothing would ever
+ * tear down; it kept feeding the shared buffer, so every later recording held
+ * each moment of audio once per leaked graph. The debug log showed files
+ * exactly 2x, 3x and then 4x the wall-clock time, which Whisper hears as
+ * stuttering speech and transcribes badly or not at all.
+ */
+let captureSession = 0;
+const ABANDONED = Symbol('abandoned');
+
+function release(stream, context) {
+  try { stream?.getTracks().forEach((t) => t.stop()); } catch {}
+  try { context?.close(); } catch {}
+}
+
+function startErrorMessage(err) {
+  return err && err.name === 'NotAllowedError'
+    ? 'Microphone access was denied. Allow it in Windows Settings › Privacy › Microphone.'
+    : `Could not start recording: ${err?.message || err}`;
+}
+
+/**
+ * The most recent start(), settling to the error that stopped it, if any. A
+ * stop that finds nothing recorded waits on this, so a microphone refused
+ * just after the key came up is reported as that rather than as silence.
+ */
+let pendingStart = Promise.resolve(null);
+const START_WAIT_MS = 3000;
+
 async function start({ deviceLabel, skipSilence }) {
+  const session = ++captureSession;
+  const current = () => session === captureSession;
+  let stream = null;
+  let context = null;
   skipSilenceGuard = !!skipSilence;
   try {
     pending = [];
@@ -305,13 +340,14 @@ async function start({ deviceLabel, skipSilence }) {
     ticker = setInterval(tick, 250);
 
     const deviceId = await resolveDeviceId(deviceLabel);
+    if (!current()) throw ABANDONED;
     // Falling back to the default is silent otherwise, and the case that
     // matters is a Bluetooth headset that has dropped: you carry on talking
     // quietly into earbuds while the laptop's own microphone is what is
     // actually recording. Worth two seconds of the meter's slot to say so.
     if (deviceLabel && !deviceId) hint('Default mic', 2000);
 
-    mediaStream = await navigator.mediaDevices.getUserMedia({
+    stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         deviceId: deviceId ? { exact: deviceId } : undefined,
         channelCount: 1,
@@ -324,12 +360,17 @@ async function start({ deviceLabel, skipSilence }) {
       },
     });
 
-    audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
-    await audioContext.audioWorklet.addModule('./collector-worklet.js');
+    if (!current()) throw ABANDONED;
 
-    const source = audioContext.createMediaStreamSource(mediaStream);
-    workletNode = new AudioWorkletNode(audioContext, 'collector');
-    workletNode.port.onmessage = ({ data }) => {
+    context = new AudioContext({ sampleRate: SAMPLE_RATE });
+    await context.audioWorklet.addModule('./collector-worklet.js');
+    if (!current()) throw ABANDONED;
+
+    const source = context.createMediaStreamSource(stream);
+    const node = new AudioWorkletNode(context, 'collector');
+    node.port.onmessage = ({ data }) => {
+      // Messages already queued when this capture was stopped.
+      if (!current()) return;
       pending.push(data.samples);
       pendingSamples += data.samples.length;
       if (data.peak > loudestPeak) loudestPeak = data.peak;
@@ -339,23 +380,31 @@ async function start({ deviceLabel, skipSilence }) {
 
     // The worklet has no output; connecting to the destination anyway keeps
     // the graph pulling frames. Gain is zeroed so nothing is played back.
-    const mute = audioContext.createGain();
+    const mute = context.createGain();
     mute.gain.value = 0;
-    source.connect(workletNode);
-    workletNode.connect(mute);
-    mute.connect(audioContext.destination);
+    source.connect(node);
+    node.connect(mute);
+    mute.connect(context.destination);
+
+    // Only a finished graph is published, so teardown() always has hold of
+    // everything that is running.
+    mediaStream = stream;
+    audioContext = context;
+    workletNode = node;
+    return null;
   } catch (err) {
+    release(stream, context);
+    // Stopped while still starting: whatever this call opened was its own to
+    // close, and stop() reports the outcome, using this error if there is one.
+    if (!current()) return err === ABANDONED ? null : err;
     teardown();
     // Short enough to read at this width. The sentence explaining what to do
     // about it goes to the main window, which has room for it.
     setState('error', 'No microphone');
     show();
-    api.sendError(
-      err && err.name === 'NotAllowedError'
-        ? 'Microphone access was denied. Allow it in Windows Settings › Privacy › Microphone.'
-        : `Could not start recording: ${err?.message || err}`
-    );
+    api.sendError(startErrorMessage(err));
     later(settle, 3600);
+    return null;
   }
 }
 
@@ -363,14 +412,14 @@ function teardown() {
   clearInterval(ticker);
   ticker = null;
   try { workletNode?.disconnect(); } catch {}
-  try { mediaStream?.getTracks().forEach((t) => t.stop()); } catch {}
-  try { audioContext?.close(); } catch {}
+  release(mediaStream, audioContext);
   workletNode = null;
   mediaStream = null;
   audioContext = null;
 }
 
 function stop() {
+  captureSession++;
   cancelPending();
   clearTimeout(lockHintTimer);
   const rate = audioContext?.sampleRate || SAMPLE_RATE;
@@ -393,7 +442,14 @@ function stop() {
 
   if (count === 0) {
     setState('error', 'Nothing recorded');
-    api.sendError('No audio was captured. Check that the right microphone is selected.');
+    // Main stays in "transcribing" until this is reported, so nothing new
+    // can start while it waits. Capped in case the microphone never answers.
+    const timeout = new Promise((r) => setTimeout(r, START_WAIT_MS, null));
+    Promise.race([pendingStart, timeout]).then((err) => {
+      api.sendError(err
+        ? startErrorMessage(err)
+        : 'No audio was captured. Check that the right microphone is selected.');
+    });
     later(settle, 3600);
     return;
   }
@@ -518,7 +574,7 @@ pill.addEventListener('pointerup', (e) => endDrag(e.pointerId));
 pill.addEventListener('pointercancel', (e) => endDrag(e.pointerId));
 pill.addEventListener('lostpointercapture', () => endDrag(null));
 
-api.on('capture:start', start);
+api.on('capture:start', (opts) => { pendingStart = start(opts); });
 api.on('capture:stop', stop);
 
 // Locked recording looks different from hold-to-talk: the user needs to know

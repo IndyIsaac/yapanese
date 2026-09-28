@@ -24,6 +24,18 @@ const HOLD_THRESHOLD_MS = 350;
  * ended and transcribed, which reads as the overlay vanishing for no reason.
  */
 const DOUBLE_TAP_WINDOW_MS = 500;
+/**
+ * A release that is undone inside this long never happened.
+ *
+ * Something on some machines (keyboard software such as Razer Synapse is the
+ * likely suspect) injects key-up/key-down pairs a few milliseconds apart. The
+ * debug log showed start, lock and finish all inside 13ms of a single press:
+ * the recording was killed before audio arrived, and the half-started capture
+ * it left behind went on writing into every later recording. No finger lifts
+ * and re-presses a key this fast, so each release is held back this long and
+ * dropped if the combo comes straight back.
+ */
+const BOUNCE_MS = 40;
 
 // Both the left and right physical key satisfy a group.
 const COMBO_KEYS = {
@@ -51,6 +63,8 @@ function create({
   let lastTapAt = 0;
   let locked = false;
   let tapTimer = null;
+  let releaseTimer = null;
+  let releasedAt = 0;
   let recording = false;
 
   const groupSatisfied = (group) => group.some((code) => down.has(code));
@@ -58,6 +72,16 @@ function create({
 
   function clearTapTimer() {
     if (tapTimer) { clearTimer(tapTimer); tapTimer = null; }
+  }
+
+  function clearReleaseTimer() {
+    if (releaseTimer) { clearTimer(releaseTimer); releaseTimer = null; }
+  }
+
+  /** Act on a release that has outlasted the bounce window. */
+  function settleRelease() {
+    clearReleaseTimer();
+    onComboUp(releasedAt);
   }
 
   function beginRecording() {
@@ -100,13 +124,14 @@ function create({
     beginRecording();
   }
 
-  function onComboUp() {
+  /** Runs BOUNCE_MS late, so times are taken from the actual release. */
+  function onComboUp(releasedAt) {
     if (!recording) return;
     // Releasing the second tap of a double tap must not stop anything; the
     // lock is already on and only a fresh press ends it.
     if (locked) return;
 
-    const heldMs = now() - pressedAt;
+    const heldMs = releasedAt - pressedAt;
     if (heldMs >= HOLD_THRESHOLD_MS) {
       endRecording(`held ${heldMs}ms`);
       return;
@@ -114,12 +139,12 @@ function create({
 
     // A short tap. If a second one arrives inside the window it locks on;
     // otherwise this was a lone tap and the recording ends when it lapses.
-    lastTapAt = now();
+    lastTapAt = releasedAt;
     clearTapTimer();
     tapTimer = setTimer(() => {
       tapTimer = null;
       if (!locked) endRecording('single tap lapsed');
-    }, DOUBLE_TAP_WINDOW_MS);
+    }, Math.max(0, DOUBLE_TAP_WINDOW_MS - (now() - releasedAt)));
   }
 
   return {
@@ -138,16 +163,23 @@ function create({
       const held = comboHeld();
       if (held && !comboActive) {
         comboActive = true;
+        // Back inside the bounce window: the release is discarded, and so is
+        // this press, which is the same one continuing.
+        if (releaseTimer) { clearReleaseTimer(); return; }
         onComboDown();
       } else if (!held && comboActive) {
         comboActive = false;
-        onComboUp();
+        releasedAt = now();
+        releaseTimer = setTimer(settleRelease, BOUNCE_MS);
       }
     },
 
     setCombo(id) {
       comboId = COMBO_KEYS[id] ? id : DEFAULT_COMBO;
       keys = COMBO_KEYS[comboId];
+      // A release still waiting out the bounce window is settled now rather
+      // than dropped, or a hold released just before this would never finish.
+      if (releaseTimer) settleRelease();
       down.clear();
       comboActive = false;
       locked = false;
@@ -157,6 +189,7 @@ function create({
     /** Called when the pipeline finishes, so state cannot get stuck. */
     reset() {
       clearTapTimer();
+      clearReleaseTimer();
       recording = false;
       locked = false;
       down.clear();
@@ -168,4 +201,4 @@ function create({
   };
 }
 
-module.exports = { create, COMBO_KEYS, HOLD_THRESHOLD_MS, DOUBLE_TAP_WINDOW_MS };
+module.exports = { create, COMBO_KEYS, HOLD_THRESHOLD_MS, DOUBLE_TAP_WINDOW_MS, BOUNCE_MS };
